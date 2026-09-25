@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Bash(curl *)",
+      "Bash(dig *)",
+      "Bash(httpx *)",
+      "Bash(whois *)",
+      "Bash(nuclei *)"
+    ]
+  }
+}

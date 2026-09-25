@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(whois netspot.com.au)",
+      "Bash(dig *)",
+      "Bash(whois *)",
+      "Bash(echo *)",
+      "Bash(cd *)",
+      "WebSearch",
+      "Bash(file images/*.jpg)",
+      "Bash(curl -s \"https://api.github.com/repos/ianeinser/kycaidplus/git/trees/master?recursive=1\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -m json.tool)",
+      "Read(//tmp/**)",
+      "Bash(mkdir *)",
+      "Bash(python3 gen.py)",
+      "Bash(pip show *)",
+      "Bash(playwright --version)",
+      "Read(//home/shubham/.cache/ms-playwright/**)",
+      "Bash(npm --version)",
+      "Bash(playwright install *)",
+      "Bash(sudo playwright install-deps)",
+      "Bash(python3 *)",
+      "Read(//home/shubham/.claude/**)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" \"https://api.stripe.com/v1/payment_pages/cs_live_doesnotexist/init\")",
+      "Bash(curl -s \"https://api.stripe.com/v1/payment_pages/cs_live_doesnotexist/init\")",
+      "Bash(curl -s \"https://api.mail.tm/domains\")",
+      "Bash(shodan version *)",
+      "Bash(env)",
+      "WebFetch(domain:developers.polymesh.network)"
+    ]
+  }
+}
