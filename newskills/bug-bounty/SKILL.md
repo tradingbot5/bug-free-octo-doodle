@@ -1558,6 +1558,12 @@ Then in Claude Code, this skill loads automatically when you ask about bug bount
 
 ---
 
+## Refresh (2024-2026)
+
+- The sub-skills this workflow dispatches to now all carry `cwe` + `cvss_baseline` + `related_skills` frontmatter and dedicated **New Techniques (2024-2026)** / **Remediation** sections — use them to set severity and write triager-ready reports.
+- **Priority classes (highest signal-to-effort today):** BOLA/BFLA & object-level authz, SPA→hidden-API (`hunt-spa-api`), OAuth/redirect_uri → ATO, framework CVEs (Next.js `x-middleware-subrequest`, Spring actuator/SpEL, SharePoint ToolShell), single-packet races, SSRF→IMDS creds, supply-chain (unpinned Actions, dependency confusion), and LLM/agentic/MCP. 
+- **Reporting:** CVSS 4.0 where requested; structure for AI/automated first-pass triage (impact + exact endpoint/param + copy-paste PoC up top). Always prove the chain and stop at minimal, redacted evidence.
+
 ## Operator Notes (Claude-BugHunter)
 
 > Engagement-derived additions to the vendored foundation. Wisdom from real

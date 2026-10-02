@@ -2,6 +2,9 @@
 name: web3-audit
 description: Smart contract security audit — 10 DeFi bug classes (accounting desync, access control, incomplete path, off-by-one, oracle, ERC4626, reentrancy, flash loan, signature replay, proxy), pre-dive kill signals (TVL < $500K etc), Foundry PoC template, grep patterns for each class, and real Immunefi paid examples. Use for any Solidity/Rust contract audit or when deciding whether a DeFi target is worth hunting.
 sources: public_research, community
+category: web3
+cvss_baseline: "Severity tracks funds-at-risk: Critical = direct theft/lock of user/protocol funds (reentrancy, oracle manipulation, access-control on money paths); High = conditional fund loss; Medium = griefing/DoS. Map to SWC/Immunefi classification in the report."
+related_skills: [meme-coin-audit, hunt-source-leak, hunt-rce, offensive-osint]
 ---
 
 # WEB3 SMART CONTRACT AUDIT
@@ -561,6 +564,20 @@ forge coverage --report summary
 - **`bb-methodology`** — When deciding whether to dive at all. Workflow primitive: PART 0 of `bb-methodology` confirms engagement (web3 bug bounty / private audit / smart-contract review); this skill's pre-dive kill signals replace the standard scoring rubric for that engagement type.
 
 ---
+
+## Technique Refresh (2024-2026)
+
+High-paying classes that dominate current Immunefi/DeFi disclosures:
+- **Price-oracle manipulation via flash loans** — spot-price reads from a manipulable AMM pool; drain lending/derivatives that trust it. Prefer TWAP/Chainlink; flag any single-block spot read.
+- **Read-only reentrancy** — a view function returns stale state mid-reentrant call; downstream protocols reading it mis-price. Check cross-contract `nonReentrant` gaps.
+- **ERC-4337 / account abstraction** — `UserOp` validation gaps, paymaster griefing, bundler trust, signature-replay across chains/entrypoints.
+- **Cross-chain bridges & messaging** — forged/replayed messages, missing source-chain verification, merkle-proof flaws (the biggest-$ incidents).
+- **Signature / EIP-712 flaws** — missing nonce/chainId/deadline → replay; `ecrecover` zero-address; permit front-running; EIP-2612.
+- **Upgradeable-proxy pitfalls** — storage-slot collision, uninitialized implementation (`initialize` front-run), `selfdestruct`/`delegatecall` to attacker logic.
+- **Solana/Anchor** — missing `Signer`/owner checks, account-substitution/"cosplay", unchecked CPI, missing `#[account(mut)]`/rent, arbitrary-program invocation.
+- **MEV / economic** — sandwichable slippage, liquidation gaming, first-depositor share inflation (ERC-4626 vaults).
+
+Tools: Foundry (fork + fuzz + invariant tests), Slither/Aderyn (static), Echidna/Medusa (fuzz), Semgrep rules; always PoC on a **fork**, never mainnet with real funds.
 
 ## Operator Notes (Claude-BugHunter)
 

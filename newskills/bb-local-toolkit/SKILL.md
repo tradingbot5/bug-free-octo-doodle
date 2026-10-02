@@ -1549,6 +1549,18 @@ Then in Claude Code, this skill loads automatically when you ask about bug bount
 
 ---
 
+## Tooling Refresh (2024-2026)
+
+Keep the local kit current — versions that matter for the new techniques:
+- **ProjectDiscovery** — `nuclei` v3 (DAST mode + updated templates), `katana` (`-jsl` jsluice mode), `httpx`, `subfinder`, `dnsx`, `interactsh-client` (OOB).
+- **JS/recon** — `jsluice` (BishopFox), `sourcemapper`/`unwebpack-sourcemap`, `kiterunner` (`kr`) for API routes, `gau`/`waybackurls`.
+- **Smuggling/race** — Burp HTTP Request Smuggler v3, Turbo Intruder (single-packet), Param Miner.
+- **Secrets** — `trufflehog` v3, `gitleaks`, `git-dumper`.
+- **Exploitation helpers** — `php_filter_chain_generator`, `ysoserial`/`ysoserial.net`, `phpggc`, `jwt_tool`, `SSTImap`/`tplmap`, `nosqlmap`, `sqlmap`+`ghauri`.
+- **Mobile** — Frida 16+, objection, jadx, apktool, MobSF, reflutter.
+- **Cloud/IAM** — `pacu`, `pmapper`, `cloudsplaining`, `enumerate-iam`, `ScoutSuite`, `trufflehog` on bundles.
+Resolve install paths per this toolkit's conventions; prefer pinned versions in CI.
+
 ## Related Skills & Chains
 
 - **`bug-bounty`** — When the user wants general bug-bounty guidance rather than tool location. Workflow primitive: `bug-bounty` is the orchestrator and routes to topic-matched hunt-* skills; this skill (`bb-local-toolkit`) answers "where is the tool / wordlist / clone on disk for that hunt?"

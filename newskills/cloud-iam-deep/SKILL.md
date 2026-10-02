@@ -3,6 +3,9 @@ name: cloud-iam-deep
 description: Cloud IAM red-team attack chain across AWS, Azure, GCP — focused on EXTERNAL exploitation paths and post-credential-discovery privilege analysis. Covers IAM enumeration (aws iam, az role, gcloud iam), STS/AssumeRole chaining, Azure Managed Identity abuse (via SSRF/leak), GCP service account JSON abuse, IMDSv1/v2 attacks via SSRF, K8s ServiceAccount token privilege analysis once held (token discovery / cluster exposure is owned by hunt-k8s), role-trust-policy confused-deputy, cross-account assume-role enumeration, IAM privilege escalation patterns (24+ AWS, 8+ Azure, 6+ GCP), and AWS Cognito Identity Pool unauthenticated-role attack chain (GetId → GetCredentialsForIdentity → IAM role abuse). Built for the case where recon yields a credential (key, JSON, token) and you need to know what it grants and how to escalate. Use when an AWS key / Azure secret / GCP service account JSON / K8s SA token surfaces from a code repo, JS bundle, APK, breach corpus, or SSRF chain.
 sources: aws-iam-docs, azure-rbac-docs, gcp-iam-docs, hackingthe.cloud, pacu, peirates, prowler, rhinosecuritylabs_research, hackerone_public
 report_count: 6
+cwe: [CWE-269, CWE-266, CWE-732, CWE-863, CWE-250]
+cvss_baseline: "High (8.1) lateral read via a discovered credential → Critical (9.1-9.8) privilege-escalation to account/project admin or cross-account/tenant assume. Scoped to post-credential escalation (discovery is owned by the recon/SSRF skills)."
+related_skills: [hunt-cloud-misconfig, hunt-ssrf, hunt-k8s, hunt-cicd, enterprise-vpn-attack]
 ---
 
 ## When to use
@@ -510,6 +513,16 @@ Without all three, triagers downgrade to Medium. The 60-second test is `GetId �
 Cross-reference: `hunt-cloud-misconfig` → `CloudWatch RUM weaponization` covers the specific RUM-embedded variant of this attack class.
 
 ---
+
+## Technique / Tooling Refresh (2024-2026)
+
+- **Map escalation automatically** — AWS: `pmapper` (privilege graph), `cloudsplaining`, `enumerate-iam`, Pacu `iam__privesc_scan` (covers the ~30 known AWS privesc primitives: `iam:CreatePolicyVersion`, `PassRole`+`lambda`/`ec2`/`glue`/`cloudformation`, `sts:AssumeRole` chains, `iam:CreateAccessKey` on another user, `ssm:StartSession`). GCP: `gcloud ... --impersonate-service-account`, `iam.serviceAccounts.getAccessToken`/`actAs`, `deploymentmanager`/`cloudfunctions` deploy-as-SA; `GCPLoot`/`hayat`. Azure: `MicroBurst`/`ROADtools`/`BARK` — Managed Identity + ARM `Microsoft.Authorization/roleAssignments/write`, `Automation`/`RunCommand`, Owner-on-subscription paths.
+- **Workload identity bridges** — EKS **IRSA** / GKE **Workload Identity** / AKS pod-identity let a compromised pod assume a cloud role; SSRF→IMDS→role is the classic entry (`hunt-ssrf`, `hunt-k8s`).
+- **OIDC trust over-permission** — CI OIDC (`sts:AssumeRoleWithWebIdentity`, GCP WIF) with loose `sub`/`aud` conditions → any repo/branch assumes the role (`hunt-cicd`).
+- **Secret stores** — once you hold a role, enumerate `secretsmanager`/SSM Parameter Store/GCP Secret Manager/Azure Key Vault for lateral creds; `GetSecretValue`/`ssm:GetParameters`.
+- **Confused-deputy / cross-account** — `sts:AssumeRole` with over-broad trust `Principal: "*"` or external-id-less roles; enumerate assumable roles across accounts.
+
+**Discipline:** demonstrate the escalation path with read-only enumeration + a single `sts get-caller-identity`/token-mint as proof; do not create persistent backdoors, exfiltrate data, or touch production resources.
 
 ## Related Skills & Chains
 

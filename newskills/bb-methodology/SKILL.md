@@ -465,6 +465,11 @@ For any iteration that runs more than 5 times, **use Python (with try/except per
 
 ---
 
+## Refresh (2024-2026)
+
+- Every `hunt-*` skill now carries standardized frontmatter — `cwe`, a `cvss_baseline` severity anchor, `related_skills` — plus a **New Techniques (2024-2026)** and **Remediation** section. Route with the observed signal; let the target skill's attack-surface signals + CWE/CVSS drive prioritization and write-up severity.
+- **Highest-yield classes right now:** API/object-level authz (BOLA/BFLA, `hunt-api-authz`/`hunt-idor`), SPA-leaked backend APIs (`hunt-spa-api`), OAuth `redirect_uri`/token flaws (`hunt-oauth`), framework-specific bypasses (Next.js `hunt-nextjs`, Spring `hunt-springboot`), single-packet race conditions (`hunt-race-condition`), SSRF→cloud-metadata (`hunt-ssrf`), and LLM/agentic bugs (`hunt-llm-ai`, `hunt-rag-vector`). Lead with chains, not isolated findings.
+
 ## Operator Notes (Claude-BugHunter)
 
 > Engagement-derived additions to the vendored foundation. Wisdom from real

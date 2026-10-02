@@ -1695,6 +1695,14 @@ Drop these prompts into a fresh Claude session to verify the skill loads and beh
 
 ---
 
+## Source Refresh (2024-2026)
+
+- **Breach/credential** — HIBP, DeHashed, IntelX, LeakCheck, Snusbase (scope-limited; feed only authorized credential-stuffing per program rules).
+- **Infra/cert** — Shodan/Censys/FOFA (favicon-hash + cert pivots), `crt.sh`/CT logs, DNSDumpster, `subfinder`/`amass`.
+- **Code/secrets** — GitHub/GitLab dorking + `trufflehog`/`gitleaks`, public Postman workspaces, npm/PyPI internal-name leads (dependency confusion → `supply-chain-attack-recon`).
+- **People/org** — role enumeration for email-format derivation and SE surface (red-team RoE only) → identity attacks (`m365-entra-attack`, `okta-attack`).
+- **Note:** OSINT stays passive; corroborate asset ownership via `recon-scope-triage` before any active testing, and handle collected PII per the program's privacy terms. For the offensive-targeted subset see `offensive-osint`.
+
 ## Related Skills & Chains
 
 - **`offensive-osint`** — When the methodology needs to be executed with concrete probes. Workflow primitive: this skill is the planning skeleton (5-stage pipeline, asset graph, findings rubric); `offensive-osint` is the operational arsenal that fills each stage with curl one-liners, wordlists, and regexes.

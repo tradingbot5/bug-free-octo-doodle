@@ -615,6 +615,15 @@ Full attack-chain analysis is in `hunt-api-misconfig` → `NSwag / Swagger / Ope
 
 ---
 
+## Tooling Refresh (2024-2026)
+
+Current workhorse chain (ProjectDiscovery-centric, all rate-limitable):
+- **Subdomains/assets** — `subfinder` + `amass` → `dnsx` (resolve) → `httpx` (probe, `-title -tech-detect -sc -cl -hash` dedupe). CT via `crt.sh`/`certspotter`.
+- **Crawl/JS** — `katana` (`-jc -jsl` jsluice mode) and `gau`/`waybackurls` for historical URLs; **`jsluice`** for endpoints+secrets in bundles; `sourcemapper` on `*.js.map`.
+- **Content/params** — `ffuf`/`feroxbuster` (dirs), `x8`/`arjun`/Param Miner (hidden params), `kiterunner` (API routes → `hunt-shadow-api`).
+- **Vuln sweep** — `nuclei` v3 (templates + DAST mode), run with strict rate limits + scope; always manual-verify hits (soft-404 control from `recon-scope-triage`).
+- **Fingerprint** — `httpx -tech-detect`/Wappalyzer, favicon-hash pivots (Shodan/FOFA) — corroborate ownership before testing.
+
 ## Operator Notes (Claude-BugHunter)
 
 > Engagement-derived + 2026-specific additions to the vendored foundation.

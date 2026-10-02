@@ -850,6 +850,19 @@ sensitive.txt      # Sensitive paths (.env, config.json, backup, etc.)
 
 ---
 
+## Payload Bank Refresh (2024-2026)
+
+Add these current primitives to the arsenal (details in the owning skills):
+- **Race** — HTTP/2 single-packet attack (Turbo Intruder `Engine.BURP2` + gate, or Burp "send group in parallel"); GraphQL alias-racing. (`hunt-race-condition`)
+- **LFI→RCE** — PHP filter-chain (`php_filter_chain_generator`) with no upload/writable file. (`hunt-lfi`)
+- **Clickjacking** — DoubleClickjacking popup+redirect (bypasses XFO + SameSite). (`hunt-clickjacking`)
+- **Next.js** — `x-middleware-subrequest` middleware bypass (CVE-2025-29927). (`hunt-nextjs`)
+- **Smuggling** — 0.CL/TE.0/chunk-terminator probes; HTTP Request Smuggler v3. (`hunt-http-smuggling`)
+- **URL-parser bypass set** (SSRF/open-redirect/CORS) — `@`/backslash/encoded-dot/unicode-dot/decimal-IP/`[::]` variants.
+- **JWT** — CVE-2022-21449 psychic signature (ES r=s=0), alg-array, kid→`/dev/null`. (`hunt-jwt-crypto`)
+- **Deserialization** — SnakeYAML/Jackson polymorphic, PHP phar polyglot, ML-model pickle. (`hunt-deserialization`)
+- **CSP bypass** — `base-uri`/JSONP/`strict-dynamic` gadget set; DOMPurify mXSS. (`hunt-xss`, `hunt-dom`)
+
 ## Operator Notes (Claude-BugHunter)
 
 > Engagement-derived + 2026-specific additions to the vendored foundation.

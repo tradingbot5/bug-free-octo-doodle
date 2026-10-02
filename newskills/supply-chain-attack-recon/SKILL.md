@@ -3,6 +3,9 @@ name: supply-chain-attack-recon
 description: External recon for software supply-chain attack surface — package-namespace squatting candidates, dependency-confusion vulnerabilities, GitHub Actions injection openings, container image registry exposure, SBOM mining, internal-package-name leakage, and CI/CD configuration exposure. Reconnaissance and identification ONLY — actual package publishing / typosquat attacks are EXTERNAL-OFFENSIVE and require explicit written sign-off because they can affect the entire npm/PyPI ecosystem. Use when the target has a public GitHub org, when their build artifacts/SBOMs are reachable, when their docker images are on Docker Hub/GHCR, or when you find internal package names in their JS bundles.
 sources: alex-birsan-dependency-confusion, supply-chain-research, github-actions-security, cisa-advisories, mandiant-tag, github-security-blog, snyk-research
 report_count: 12
+cwe: [CWE-1104, CWE-506, CWE-494, CWE-829, CWE-427]
+cvss_baseline: "Critical (9.8) code execution in build/CI or shipped artifacts via a claimable package/poisoned dependency → mass downstream compromise; High for secret/token exfil from pipelines."
+related_skills: [hunt-cicd, hunt-source-leak, hunt-cloud-misconfig, offensive-osint]
 ---
 
 ## When to use
@@ -638,6 +641,22 @@ Twelve well-documented public cases, mapped to the recon surface above. Each ent
 - **CI runners are the highest-value foothold** — every case where attacker code executed on a CI runner yielded cloud / GitHub / secrets in bulk.
 
 ---
+
+## Incident/Technique Refresh (2024-2026)
+
+The threat moved from theory to mass-exploited — fingerprint these patterns:
+- **Malicious GitHub Actions** — `tj-actions/changed-files` **CVE-2025-30066** + `reviewdog` compromise: backdoored Actions dumped CI secrets across thousands of repos. Audit every unpinned `uses:` (tag/branch, not SHA). (Cross-ref `hunt-cicd`.)
+- **xz-utils backdoor (CVE-2024-3094)** — a planted upstream maintainer shipped an sshd backdoor; lesson: audit build scripts/`m4`/test blobs, not just source, and watch maintainer-handoff social engineering.
+- **npm/PyPI worms & malware** — the 2025 **"Shai-Hulud"** self-propagating npm worm (steals tokens, republishes), `Nx` build-tool compromise, mass typosquat/starjacking campaigns; `install`-script and postinstall abuse.
+- **Polyfill.io (2024)** — a trusted CDN dependency turned malicious after acquisition → supply-chain via a `<script>` everyone trusted; audit third-party CDN/JS dependencies for ownership change.
+- **Dependency confusion** (Birsan) still works — internal package names resolvable on the public registry; claim the namespace. Also **protestware** and **lockfile/transitive** injection.
+
+**Recon moves:** enumerate internal package names (bundles, `package.json`, errors), public GitHub org Actions + pinning, published artifacts/images, and registry namespace availability. Report the claimable/poisonable path; never actually publish malicious packages or execute in others' pipelines.
+
+## Remediation
+
+- Pin dependencies and Actions to hashes/integrity (lockfiles, `uses:@<sha>`); reserve internal namespaces on public registries; use a private registry with scoped resolution.
+- Verify provenance (Sigstore/SLSA), review maintainer changes and install scripts, scan artifacts/images in CI; least-privilege, short-lived CI tokens so a compromised step can't exfiltrate much.
 
 ## Related Skills & Chains
 
