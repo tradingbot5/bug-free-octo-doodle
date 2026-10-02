@@ -3,6 +3,9 @@ name: hunt-shadow-api
 description: "Hunt shadow / zombie / undocumented API surface (OWASP API9 Improper Inventory Management) — enumerate the full API version history (v1/v2/beta/legacy paths, header- and subdomain-based versioning), pull and diff every reachable OpenAPI/Swagger spec (including ones only findable via the Wayback Machine), and behaviorally diff old vs. current versions for auth/rate-limit/validation regressions rather than just response-shape differences. Distinct from hunt-api-misconfig, which owns exploitation once you have a spec or endpoint (mass assignment, JWT, OData, Swagger-chain attacks); distinct from hunt-subdomain, which owns host-level discovery. This skill owns the version-inventory and behavioral-diff workflow itself. Use when the target has versioned API paths, multiple specs, a changelog referencing deprecated endpoints, or a mobile app whose hardcoded backend calls look older than the current web app's."
 sources: owasp_api_top10_2023, portswigger_research, public_research
 report_count: 0
+cwe: [CWE-1059, CWE-285, CWE-668, CWE-16]
+cvss_baseline: "High-Critical (8.1-9.8) old version bypasses auth the current one enforces → High (7.5) old version leaks PII/extra fields or accepts payloads the new one now validates → Informational if behaviorally identical. The finding is the regression delta, not the version's existence."
+related_skills: [hunt-api-misconfig, hunt-subdomain, hunt-source-leak, hunt-spa-api, apk-redteam-pipeline, hunt-brute-force]
 ---
 
 ## OWASP API9 — Improper Inventory Management (Shadow / Zombie APIs)
@@ -124,6 +127,23 @@ are the finding.
   is not a finding — confirm the underlying operation still executes.
 
 ---
+
+## Modern Discovery Tooling (2024-2026)
+
+- **kiterunner (`kr`)** — the purpose-built shadow-API brute-forcer; uses route+method wordlists derived from real Swagger/API corpora: `kr scan https://$TARGET -w routes-large.kite -x 20`. Finds endpoints no spec links.
+- **nuclei** — `http/exposures/apis/` and `openapi`/`swagger` templates flag exposed specs and API docs.
+- **Postman / public workspaces** — search `postman.com` public workspaces and leaked collections for the org's internal endpoints + example tokens; import the collection and replay.
+- **mitmproxy2swagger / APIKit (Burp)** — reconstruct a spec by proxying the live app/mobile traffic, then diff against the published spec.
+- **gau / waybackurls + gf** — pull historical endpoints the current site dropped (pairs with the Wayback spec hunt above).
+- **FOFA / Shodan** — favicon-hash and `body=` pivots to find sibling API hosts (corroborate ownership via `recon-scope-triage`).
+- **GraphQL versions** — check for `/graphql`, `/v1/graphql`, `/graphql/v2`; an older schema (introspection on) alongside a hardened current one is the same zombie-delta pattern (`hunt-graphql`).
+
+## Remediation
+
+- Maintain a live API inventory (every version, host, and route) and apply security controls (auth, rate-limit, validation, field redaction) uniformly across versions, not forward-only.
+- Formally decommission deprecated versions (return 410/404 and route to a stub that executes nothing), not just hide them from the UI.
+- Gate internal/staging/debug route groups at the edge; don't rely on them being unlinked.
+- Remove old specs from the web root and request de-indexing; don't ship `/internal`/`/debug` paths in `robots.txt`/`sitemap.xml`.
 
 ## Severity Table
 

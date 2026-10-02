@@ -1,8 +1,11 @@
 ---
 name: hunt-jwt-crypto
-description: "Hunt JWT cryptographic failures — alg:none signature-stripping and RS256→HS256 key-confusion that let an attacker forge a token for any identity (e.g. an admin) without knowing a secret. Use when the app authenticates with a JSON Web Token (an `eyJ...` Bearer token in the Authorization header, a cookie, or a login response). This skill OWNS JWT signature/crypto forgery (alg:none, key confusion, kid/jku header injection); hunt-ato covers JWT as one ATO path, hunt-auth-bypass covers SSO/SAML token trust, hunt-api-misconfig covers non-crypto JWT handling. Critical when a forged token grants access to another user's data or an admin-only endpoint."
+description: "Hunt JWT cryptographic failures — alg:none signature-stripping and RS256→HS256 key-confusion that let an attacker forge a token for any identity (e.g. an admin) without knowing a secret. Covers kid/jku/x5u/jwk header injection, weak-HMAC cracking, CVE-2022-21449 psychic signatures (ECDSA r=s=0), alg-array/cty nested-token confusion. Use when the app authenticates with a JSON Web Token (an `eyJ...` Bearer token in the Authorization header, a cookie, or a login response). This skill OWNS JWT signature/crypto forgery; hunt-ato covers JWT as one ATO path, hunt-auth-bypass covers SSO/SAML token trust, hunt-api-misconfig covers non-crypto JWT handling. Critical when a forged token grants access to another user's data or an admin-only endpoint."
 report_count: 6
-sources: hackerone_public
+sources: hackerone_public, cve_database, portswigger_research, public_research
+cwe: [CWE-347, CWE-345, CWE-327, CWE-290, CWE-321]
+cvss_baseline: "High (8.1) forge to a normal user → Critical (9.8) forge admin / any-user, or crack a weak HMAC secret. A forge that only loads your own data is proof-of-mechanism, not impact."
+related_skills: [hunt-ato, hunt-auth-bypass, hunt-api-misconfig, hunt-ssrf, hunt-oauth, triage-validation]
 ---
 
 # HUNT-JWT-CRYPTO — Forgeable JSON Web Tokens (A04 Cryptographic Failures)
@@ -168,6 +171,31 @@ object, or a completed admin action (the deleted-user confirmation). Reading the
 admin user list or performing the admin action with a forged token IS the exploit.
 A 200 that returns only your own data, or a 401, is not proof.
 
+## New Techniques (2024-2026)
+
+### CVE-2022-21449 — "Psychic Signatures" (ECDSA on Java 15-18)
+If the token is ES256/ES384/ES512 and the backend is Java 15-18 (pre-patch), a signature with both `r` and `s` set to **zero** validates against any public key. Forge an ES256 token with the all-zero signature (`MAYCAQACAQA` encodes r=0,s=0) → universal bypass with no key at all. Fingerprint Java via error pages/headers; try it on any EC-signed token.
+
+### alg-array / type-confusion
+Some verifiers accept `"alg":["none"]` or `"alg":["HS256","none"]` (array), or coerce a non-string alg → `none` path. Also test lowercase/case variants (`none`,`None`,`nOnE`) and `"alg":""`.
+
+### cty / nested-JWT ("JWT-in-JWT") confusion
+Set `"cty":"JWT"` and nest a second token; some libraries verify the outer and trust the inner's claims unverified. Also abuse `"b64":false` (unencoded payload, RFC 7797) where the verifier mishandles it.
+
+### JWKS / jku cache & host-allowlist bypass
+- If `jku`/`x5u` is host-allowlisted, chain an open-redirect or SSRF on the target's own domain so the key fetch resolves to attacker JWKS (cross-ref `hunt-open-redirect`, `hunt-ssrf`).
+- Some gateways cache JWKS by `kid`; a first-seen attacker `kid`+`jwk` can poison the cache.
+
+### Claim-based privilege / tenant escalation without breaking crypto
+Even with valid signing, if the app re-signs tokens it issues, request a token then test whether editing a *non-signed* mirror (a parallel cookie, a client-trusted copy, or a claim the server doesn't re-verify like `org_id`/`role`) changes authorization. Cross-ref `hunt-api-misconfig`, `hunt-idor`.
+
+## Remediation
+
+- Pin the expected algorithm server-side (don't trust the token's `alg`); reject `none`; use separate keys per algorithm so an RSA public key can't serve as an HMAC secret.
+- Ignore or strictly allowlist `kid`/`jku`/`x5u`/`jwk` header-supplied key material; never fetch keys from token-controlled URLs or load key files by token-controlled paths.
+- Enforce `exp`/`nbf`/`iss`/`aud`; use strong, high-entropy HMAC secrets (not reused app secrets); patch JWT/JDK libraries (CVE-2022-21449).
+- Re-check authorization server-side against the authenticated principal; never trust `role`/`org_id`/`is_admin` claims as the sole gate.
+
 ## Validation discipline
 
 - Decode and confirm the token you sent actually carries the edited claims.
@@ -175,3 +203,11 @@ A 200 that returns only your own data, or a 401, is not proof.
   user data (e.g. other users' emails) in the response.
 - `alg:none` rejected (401) just means that flaw is patched — try key confusion
   before concluding the app is safe.
+
+## Disclosed Report Patterns
+
+Verify before quoting IDs/amounts.
+- **alg:none / RS256→HS256 key confusion → admin forge** — the canonical critical JWT disclosure.
+- **kid path-traversal / SQLi** and **jku SSRF-chained host bypass** — recurring high-severity.
+- **Weak/reused HMAC secret cracked offline** → universal forge — common medium→critical.
+- **CVE-2022-21449 psychic signatures** on Java services — brief but widespread window.

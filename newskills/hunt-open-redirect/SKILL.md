@@ -1,8 +1,11 @@
 ---
 name: hunt-open-redirect
-description: Hunt Open Redirect — all types including low-impact, chained to OAuth token theft → ATO, phishing chains. URL parameter manipulation, JavaScript redirect, meta refresh, header injection. Use when hunting redirect bugs or building ATO chains.
-sources: hackerone_public
+description: Hunt Open Redirect — all types including low-impact, chained to OAuth token theft → ATO, phishing chains. URL parameter manipulation, JavaScript redirect, meta refresh, header injection, URL-parser-differential allowlist bypass. Use when hunting redirect bugs or building ATO chains.
+sources: hackerone_public, portswigger_research, public_research
 report_count: 28
+cwe: [CWE-601, CWE-610]
+cvss_baseline: "Low (3.1-4.3) standalone redirect → High (7.1-8.1) chained to OAuth code/token theft or server-side SSRF → the value is almost always in the chain, not the redirect itself."
+related_skills: [hunt-oauth, hunt-ssrf, hunt-ato, hunt-dom, hunt-host-header]
 ---
 
 # HUNT-OPEN-REDIRECT — Open Redirect
@@ -167,13 +170,55 @@ cat recon/$TARGET/urls.txt | gf redirect | qsreplace "https://evil.com" | \
 
 ---
 
+## New Techniques (2024-2026)
+
+### URL-parser-differential allowlist bypass
+When the app allowlists the redirect host, the bug is usually that the *validator* and the *browser* (or a server-side fetcher) parse the URL differently. Modern payloads target that gap:
+```
+https://attacker.com\@target.com            # backslash: validator sees host=target.com, browser sees attacker.com
+https://target.com%2523@attacker.com        # double-encoded fragment/userinfo confusion
+https://target.com%2f%2f@attacker.com
+https://attacker.com%3F.target.com           # encoded ? makes rest a query to the browser
+https://attacker.com%E3%80%82target%E3%80%82com   # ideographic full-stop (。) normalized to "." → attacker.com
+https://target。com@attacker.com              # unicode-dot host confusion
+//attacker.com/%2e%2e                         # scheme-relative + traversal
+/\/\attacker.com                              # multiple slash/backslash mixes
+https://target.com.attacker.com               # suffix-match allowlist bug ("startsWith target.com")
+https://attacker.com#@target.com / ?@target.com
+```
+Also test allowlist logic directly: `startsWith("target.com")`, `contains("target.com")`, and unanchored regex (`target\.com` without `^...$`) each break on one of the above.
+
+### `redirect_uri` allowlist bypass in OAuth (the money chain)
+- **Path append / traversal:** registered `https://target.com/callback` but server does prefix match → `…/callback/../redirect?url=//attacker` or `…/callback/..%2f`.
+- **Subdomain/sibling:** `redirect_uri=https://attacker-controlled.target.com/...` when any subdomain is allowed.
+- **Fragment/trailing abuse:** append `#` or extra params the matcher ignores but the browser honors.
+Full mechanics in `hunt-oauth`; this skill provides the redirect primitive the OAuth chain consumes.
+
+### Request-smuggling / header-injection redirect
+CRLF into a redirect param (`?next=%0d%0aLocation:%20//attacker`) → response-splitting redirect; cross-ref `hunt-host-header` and `hunt-http-smuggling`.
+
+## Remediation
+
+- Don't reflect user input into redirects. Prefer server-side mapping (token → fixed URL) over free-form `?next=`.
+- If a URL must be accepted, allowlist by **exact host match on a correctly-parsed URL** (parse, then compare the host component — never `startsWith`/`contains`/substring), and allow only `https` + relative paths.
+- Default to relative-path-only redirects; reject absolute URLs, scheme-relative (`//`), and non-http schemes (`javascript:`, `data:`).
+- For OAuth, exact-match registered `redirect_uri` (full string, no prefix/subpath matching).
+
 ## Validation
 
-✅ Location header in response points to evil.com (your controlled domain)
-✅ Browser follows redirect to attacker-controlled page
+✅ Location header (or JS navigation / meta-refresh) sends the browser to evil.com (your controlled domain)
+✅ Browser actually lands on the attacker-controlled page (confirm DOM-based ones in a real browser, not curl)
+✅ For chains, demonstrate the consumed artifact (OAuth `code`/token delivered to attacker, or SSRF content)
 
 **Severity:**
 - Redirect alone: Low (most programs)
 - Chains to OAuth code theft → ATO: High/Critical
 - Chains to phishing with brand name: Low-Medium
 - Server-side → SSRF: High
+
+## Disclosed Report Patterns
+
+Verify before quoting IDs/amounts.
+- **Open redirect on a trusted domain → OAuth `redirect_uri` chain → auth-code theft → ATO** — the canonical high-value open-redirect disclosure shape.
+- **Allowlist suffix/substring bypass** (`target.com.attacker.com`, backslash/`@` confusion) — recurring low→medium that becomes the OAuth chain's enabler.
+- **DOM-based open redirect** from `location.hash`/`search` into `location.href` — PortSwigger-documented, common in SPAs.

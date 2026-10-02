@@ -1,8 +1,11 @@
 ---
 name: hunt-nosqli
-description: Hunt NoSQL Injection — MongoDB operator injection ($where, $regex, $gt, $ne), CouchDB, Redis command injection, auth bypass via NoSQLi, data dump. Use when target uses MongoDB/Mongoose, CouchDB, Redis, or shows NoSQL error messages.
-sources: hackerone_public
+description: Hunt NoSQL Injection — MongoDB operator injection ($where, $regex, $gt, $ne), aggregation/$function server-side JS, GraphQL-variable operator injection, mongo-sanitize bypass, CouchDB, Redis command injection, auth bypass via NoSQLi, data dump. Use when target uses MongoDB/Mongoose, CouchDB, Redis, or shows NoSQL error messages.
+sources: hackerone_public, portswigger_research, public_research
 report_count: 14
+cwe: [CWE-943, CWE-89, CWE-74]
+cvss_baseline: "Medium (6.5) blind char-exfil only → High (7.5-8.2) full user-collection dump → Critical (9.8) auth bypass as admin or $where/$function RCE-class server-side JS."
+related_skills: [hunt-sqli, hunt-graphql, hunt-auth-bypass, hunt-ssrf, hunt-api-misconfig]
 ---
 
 # HUNT-NOSQLI — NoSQL Injection
@@ -133,13 +136,54 @@ curl "https://$TARGET/fetch?url=gopher://127.0.0.1:6379/_*1%0d%0a%248%0d%0aflush
 
 ---
 
+## New Techniques (2024-2026)
+
+### Operator injection through GraphQL variables / JSON bodies
+GraphQL resolvers that pass a filter object straight to Mongo are operator-injectable via the variables map:
+```json
+{"query":"query($f:UserFilter){users(filter:$f){email}}",
+ "variables":{"f":{"username":{"$ne":null}}}}
+```
+Any JSON API whose body becomes a query filter (`find(req.body.filter)`) is the same bug. Cross-ref `hunt-graphql`.
+
+### Aggregation-pipeline & `$function` / `$accumulate` injection (MongoDB 4.4+)
+If input reaches an aggregation stage, server-side JS is reachable again even when `$where` is disabled:
+```json
+{"$match":{"$expr":{"$function":{"body":"function(){return true}","args":[],"lang":"js"}}}}
+```
+`$function`/`$accumulator` execute JS in the DB process → blind exfil / DoS. Also abuse `$lookup` to join and leak other collections, and `$expr`+`$regexMatch` for char-exfil oracles.
+
+### mongo-sanitize / express-mongo-sanitize bypass
+Sanitizers that strip keys starting with `$` or containing `.` are bypassable:
+- **Dotted-path keys** when only `$` is filtered: `{"user.role":"admin"}` (reaches nested field).
+- **`$`-replacement gaps** — some configs replace `$` with a benign char but leave `{"$ne":...}` reachable via unicode (`＄ne`, full-width) or via arrays/HPP (`user[$ne]=`).
+- **Prototype-pollution-adjacent** `__proto__`/`constructor` keys slipping through. Cross-ref `hunt-prototype-pollution`.
+
+### Type-juggling / array-coercion in typed stacks
+Sending `password[$ne]=` (array) where a string is expected makes Mongoose cast it to an operator object even on "typed" schemas if `strictQuery` is off. Always try the array form when JSON objects are rejected.
+
+## Tooling
+
+- **NoSQLMap** — auth-bypass + data-extraction automation (authorized, rate-limited).
+- **Burp** — intruder operator permutations; **GraphQL Raider / InQL** for variable-injection.
+- **mongosh** against a lab instance to validate `$function`/aggregation payloads before firing at the target.
+
 ## Bypass Table
 
 | Defense | Bypass |
 |---------|--------|
 | JSON.parse rejects objects | Use array: `password[$ne]=x` (URL params) |
-| Sanitizes `$` | Unicode: `$gt` |
-| Blocks operator keys | Nested objects deeper in structure |
+| Sanitizes `$` | Unicode/full-width `＄gt`, or dotted keys `user.role` |
+| Blocks operator keys | Nested objects deeper in structure, or `$expr`/aggregation stage |
+| `$where` disabled | `$function`/`$accumulator` in an aggregation `$expr` |
+| express-mongo-sanitize strips `$`/`.` | dotted path when only `$` filtered; `__proto__` key; HPP array form |
+
+## Remediation
+
+- Cast and validate input types before building queries (enforce string/number at the schema; Mongoose `strictQuery`); never pass `req.body`/`req.query` objects directly into `find()`/filters.
+- Disable server-side JS (`$where`, `$function`, `$accumulator`) at the DB (`--noscripting`) unless strictly needed.
+- Use parameterized/ODM query builders with explicit field+operator allowlists; reject keys starting with `$` or containing `.` at the boundary (and treat sanitizers as defense-in-depth, not the only control).
+- For GraphQL, validate filter inputs against a strict schema; don't forward arbitrary filter objects to the DB.
 
 ---
 

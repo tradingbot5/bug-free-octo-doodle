@@ -1,8 +1,11 @@
 ---
 name: hunt-spa-api
 description: Discover a single-page-app's hidden backend API from its public JS bundle, then test that API for broken access control / missing authentication. One of the highest-yield web plays in modern recon — SPAs ship their entire backend route map to the browser, and the API behind them is frequently missing the auth middleware the login page implies. Built from an authorized engagement where this play found an unauthenticated financial API that an ASM scan reporting hundreds of "Criticals" completely missed. Use whenever a target serves a JS-heavy SPA (React/Vue/Angular/Next), an "app"/"console"/"dashboard"/"portal" subdomain, or any `*api*` host shows up in recon. Leaked build artifacts (source maps / .env / .git / asset-manifest) are owned by hunt-source-leak; API version-inventory and behavioral diffing by hunt-shadow-api; this skill owns mapping a live SPA's backend routes from its JS bundle and testing them for broken access control / missing auth.
-sources: authorized-engagement
+sources: authorized-engagement, operator_experience, public_research
 report_count: 1
+cwe: [CWE-862, CWE-863, CWE-306, CWE-200]
+cvss_baseline: "High (7.5-8.2) unauthenticated read of sensitive data via a route group missing auth → Critical (9.1-9.8) unauth write / client-supplied privilege flag / financial API. Discovering routes is not a finding; a crossed auth boundary is."
+related_skills: [hunt-api-misconfig, hunt-idor, hunt-source-leak, hunt-nextjs, hunt-shadow-api, recon-scope-triage, redteam-mindset]
 ---
 
 ## When to use this skill
@@ -101,6 +104,26 @@ A common, dangerous architecture:
 The frontend login is theatre if the API doesn't independently validate the token on every route. Always test the API directly, bare, regardless of how locked-down the login UI is.
 
 ---
+
+## New Surfaces & Tooling (2024-2026)
+
+### Modern JS-recon tooling (faster than hand-grepping)
+- **jsluice** (BishopFox) — extract URLs, paths, and secrets from JS with a parser, not regex: `jsluice urls bundles/*.js`, `jsluice secrets bundles/*.js`.
+- **katana** (ProjectDiscovery) — `-jc` (JS crawl) + `-jsl` (jsluice mode) to auto-harvest endpoints from live SPAs.
+- **LinkFinder / xnLinkFinder / getJS** — endpoint extraction incl. relative paths.
+- **sourcemapper / unwebpack-sourcemap / sourcemap-js** — if `*.js.map` is served, reconstruct original TS/JSX for exact route + auth-logic reading (hand off leaked maps to `hunt-source-leak`).
+- **trufflehog / gitleaks** against downloaded bundles for high-confidence secret classification.
+Run jsluice first; it finds route strings and secrets the resource-word grep misses.
+
+### New SPA frameworks & data surfaces
+- **Next.js (app router)** — `self.__next_f` RSC payload stream and `__NEXT_DATA__` embed server data + sometimes props with secrets; **Server Actions** are POST endpoints identified by a `next-action` header/id — enumerate and test them unauth. Layer `hunt-nextjs` middleware-bypass (`x-middleware-subrequest`) and `/_next/data/<buildId>/*.json`.
+- **GraphQL in the bundle** — grep for `query`/`mutation` template literals and persisted-query hashes; feed to `hunt-graphql` (introspection, field-level authz).
+- **WebSocket endpoints** — `new WebSocket("wss://…")` literals; test unauth connect + message authz (cross-ref `hunt-websocket`).
+- **Runtime config** — `window.__ENV`, `window.__CONFIG`, `/config.js`, `/env.js`, Vite `import.meta.env` leftovers often ship API bases + keys.
+- **wasm / `.wasm`** — occasionally carries endpoint strings (`wasm2wat` then grep).
+
+### Secret-triage discipline (avoid over-claiming)
+Classify before reporting: Google `AIza…` → usually Maps/Firebase (test `identitytoolkit` for `CONFIGURATION_NOT_FOUND` = not Auth). `sk_live_`/`AKIA`/private JWTs/`xoxb-`/GitHub `ghp_` = validate reachability, then report. A key that grants nothing is informational.
 
 ## Anti-patterns
 

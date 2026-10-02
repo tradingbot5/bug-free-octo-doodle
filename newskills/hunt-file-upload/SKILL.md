@@ -3,6 +3,9 @@ name: hunt-file-upload
 description: "Hunt file upload bugs — RCE via webshell, XSS via SVG/HTML, SSRF via XXE in DOCX, path traversal via filename. Bypass tables (10 techniques): double extension (shell.php.jpg if server checks last ext only), magic bytes spoofing (PNG header on PHP), null byte (shell.php\0.jpg), case (PHP, .Php, .pHP), .htaccess upload to enable execution, SVG with <script>, HTML/SVG XSS, DOCX with embedded XXE, ZIP slip (../../../etc/passwd in archive), polyglot files. Detection: any /upload, /avatar, /profile-picture, /attachment, /import endpoint. Test: upload PHP/JSP/ASPX shells, request via direct URL, check response. Validate: actual code execution (whoami output) for RCE; reflected XSS in profile-photo URL. Use when testing file upload features, avatar/attachment endpoints, import/export functions, XML/DOCX/ZIP processors. Real paid examples."
 sources: hackerone_public, cve_database, owasp, public_research
 report_count: 5
+cwe: [CWE-434, CWE-22, CWE-79, CWE-611, CWE-918]
+cvss_baseline: "Medium (5.4-6.1) stored XSS via served SVG/HTML → High (7.5-8.6) SSRF/LFI via image/PDF processor → Critical (9.8) webshell RCE or presigned-URL arbitrary-object write."
+related_skills: [hunt-rce, hunt-xxe, hunt-xss, hunt-ssrf, hunt-cloud-misconfig, triage-validation]
 ---
 
 ## 9. FILE UPLOAD
@@ -147,6 +150,47 @@ curl -s -X POST "https://$TARGET/api/import" \
 ```
 
 ---
+
+## New Techniques (2024-2026)
+
+### Cloud presigned-URL / direct-to-bucket upload abuse
+Modern apps hand the client a presigned S3/GCS/Azure URL or a POST policy. Attack the *policy*, not the file:
+- **Unconstrained key/path** — if the presigned PUT or POST-policy `key` is client-controlled without a prefix lock, upload to an arbitrary object path (overwrite another user's avatar, write to a web-served path, or `../`-style key traversal). 
+- **Content-Type not pinned** in the policy → upload `text/html`/`image/svg+xml` served inline from the bucket origin → stored XSS on the storage domain (and sometimes the app origin via CDN).
+- **Policy allows any bucket/ACL** → public-read or cross-tenant write. Cross-ref `hunt-cloud-misconfig`.
+Capture the presign response, then replay the PUT with a changed `key`/`Content-Type`.
+
+### Content-type sniffing → stored XSS even on "image-only" uploads
+If the response serving the file lacks `X-Content-Type-Options: nosniff` and isn't on a sandboxed origin, a polyglot or mislabeled file is sniffed as HTML. Upload an image whose bytes also parse as HTML/JS; serve path renders as XSS. Also test SVG served with `image/svg+xml` (executes script) vs forced-download `Content-Disposition`.
+
+### TOCTOU / race on validate-then-store
+Some flows upload to a temp path, validate, then move/rename. Race the window: request the temp URL repeatedly during the validation gap, or re-upload the same name to swap a validated file for a malicious one before the move. Cross-ref `hunt-race-condition`.
+
+### Image/document parser memory-safety & command CVEs
+Server-side media pipelines remain a rich RCE/SSRF surface — identify the processor and match the CVE:
+- **libwebp CVE-2023-4863** (heap overflow; ubiquitous via Chromium/Electron/image libs).
+- **Ghostscript** CVE-2023-36664 / CVE-2021-3781 (command execution via crafted PostScript/EPS/PDF) — any "PDF/EPS thumbnail" feature.
+- **ImageMagick** ImageTragick family + coder SSRF (MVG/SVG/MSL) still alive on legacy farms.
+- **ExifTool CVE-2021-22204** (RCE via crafted DjVu/metadata) on avatar/EXIF pipelines.
+Fingerprint via error strings, response headers, or thumbnail behavior, then test the matching PoC against your own test asset.
+
+### Filename path traversal to overwrite (not just place)
+`filename=../../../../app/config/settings.py` or `..%2f` to overwrite config/cron/web files where the server joins the raw filename to a path. Also test leading `/`, UNC `\\`, and unicode/overlong-UTF-8 separators.
+
+## Remediation
+
+- Validate type by parsing/re-encoding the file (decode the image and re-emit), not by extension/MIME header; store with a server-generated UUID name and no user-controlled path.
+- Serve user uploads from a separate, sandboxed origin (no cookies) with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`; never execute from the upload directory.
+- For presigned URLs, lock the key prefix, content-type, size, and ACL in the policy server-side; validate ownership of the resulting object.
+- Disable external entities and risky coders in parsers (ImageMagick policy.xml, disable Ghostscript where unneeded); keep media libraries patched; isolate processing workers from internal network and cloud metadata.
+- Validate archive member paths (reject `../`, absolute, symlinks) before extraction.
+
+## Validation Gate
+
+- **RCE:** a real `whoami`/`id` round-trip from the served shell — not merely "upload accepted".
+- **XSS:** the script fires in a victim browser on a meaningful origin (note if it's a sandboxed storage domain — that lowers impact).
+- **SSRF/LFI:** internal/metadata/file content actually returned via the processor.
+- A file that is stored but never served, executed, or parsed is a write-only blob, not a finding.
 
 ## Related Skills & Chains
 

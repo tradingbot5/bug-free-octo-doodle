@@ -3,6 +3,9 @@ name: hunt-rag-vector
 description: "Hunt vector-store / embedding-layer weaknesses in RAG pipelines (OWASP LLM08 Vector and Embedding Weaknesses) — persistent corpus poisoning that survives across sessions and users (distinct from one-shot indirect prompt injection, which is owned by hunt-llm-ai), cross-tenant vector-database IDOR (unauthenticated or unscoped queries against Pinecone/Weaviate/Chroma/Milvus/Qdrant/pgvector), source-text/metadata leakage in similarity-search results, and retrieval-hijack via adversarial embedding proximity ('SEO poisoning' for RAG). Targets: any app with a shared knowledge base, document upload feeding a chatbot, or a directly reachable vector-DB port. Validate: a second, clean session/account must inherit a poisoned result, or a cross-tenant artifact must be independently verifiable — confabulation is not a finding, same bar as hunt-llm-ai. Use when target is RAG-backed, exposes a vector-DB port, or lets users upload documents that other users' queries later retrieve."
 sources: owasp_genai_2025_2026, public_research
 report_count: 0
+cwe: [CWE-862, CWE-863, CWE-200, CWE-349, CWE-77]
+cvss_baseline: "Critical (9.1-9.8) unauthenticated full-corpus read of a vector DB → High-Critical verified cross-tenant retrieval or persistent poison reaching a second session → Low-Medium own-tenant metadata leak / unchained retrieval hijack."
+related_skills: [hunt-llm-ai, hunt-idor, hunt-api-misconfig, hunt-cloud-misconfig, hunt-deserialization, triage-validation]
 ---
 
 ## LLM08 — Vector & Embedding Weaknesses (RAG Pipeline Attacks)
@@ -139,6 +142,27 @@ or steering the user toward an attacker-controlled link/action).
    score the finding by what happens once the hijacked content reaches the LLM's answer.
 
 ---
+
+## New Techniques (2025-2026)
+
+### Managed vector-DB key abuse
+Pinecone/Weaviate-Cloud/Qdrant-Cloud API keys leak in JS bundles, mobile apps, and `config.js` the same way any cloud key does. A leaked key often grants full read/write to the index (cross-tenant). Validate scope minimally (list collections / `describe_index_stats`), then stop. Cross-ref `hunt-cloud-misconfig`, `hunt-spa-api`.
+
+### Default-no-auth newer deployments
+Chroma, Qdrant, Milvus, and Weaviate ship auth-off by default in many versions; self-hosted instances exposed on `:8000/:6333/:19530/:8080` frequently have no credential. Confirm reachability (`/heartbeat`, `/collections`) before any read, and treat an unauthenticated content read as Critical.
+
+### Poisoned corpus → agent/MCP tool execution
+When RAG feeds an agent that can call tools (MCP servers, function-calling), a retrieved poisoned chunk becomes *indirect tool invocation*: the instruction in the chunk drives a `fetch`/`exec`/`send_email` tool the agent is wired to. This escalates poisoning from "wrong answer" to action-with-impact. Score by the tool's blast radius; cross-ref `hunt-llm-ai` (tool-use exfil) and `hunt-deserialization` (ML-model/`pickle` ingestion as a separate RCE path on the same pipeline).
+
+### Ingestion-path RCE (not an LLM bug)
+The document/embedding ingestion worker often parses files (PDF/DOCX/image) and loads models — the same parser/deserialization CVEs from `hunt-file-upload` and `hunt-deserialization` apply. An "upload a doc for the chatbot" feature can be a server-side RCE surface independent of any prompt-injection.
+
+## Remediation
+
+- Enforce tenant isolation at the vector-DB layer (per-tenant namespaces/collections + server-side scoping), never only in the app layer; require auth on the DB even when network-internal.
+- Never expose raw similarity-search/debug/embedding endpoints unauthenticated; redact source-chunk text/doc IDs the querying principal can't access.
+- Treat all ingested content as untrusted: sanitize/strip hidden instructions, isolate the ingestion+agent workers, and gate any agent tool actions driven by retrieved content behind policy/human approval.
+- Keep managed-DB API keys server-side; scope them least-privilege; rotate on leak.
 
 ## Severity Table
 
