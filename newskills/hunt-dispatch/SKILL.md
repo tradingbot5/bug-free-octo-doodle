@@ -3,6 +3,8 @@ name: hunt-dispatch
 description: Skill-set loader for /hunt orchestrator. Fingerprints the target, picks the right platform attack skills, and loads the Red Team or WAPT skill set. Use when /hunt has just received a mode answer (redteam or wapt + blackbox|greybox) and needs to load the appropriate skills and print the taxonomy. Not for direct user invocation.
 sources: community
 report_count: 0
+category: process
+related_skills: [bb-methodology, recon-scope-triage, triage-validation, redteam-mindset]
 ---
 
 # hunt-dispatch
@@ -366,6 +368,10 @@ never echo back, log, or persist:
 - client identifiers in user-level memory
 
 ---
+
+## Dispatch note (2024-2026)
+
+Every `hunt-*` skill this routes to now carries standardized frontmatter — `cwe`, a `cvss_baseline` severity anchor, and `related_skills` — plus a **New Techniques (2024-2026)** and **Remediation** section. When dispatching, hand off with the observed signal (stack, header, param shape) and let the target skill's attack-surface signals + CWE/CVSS guide prioritization and write-up severity.
 
 ## Related Skills & Chains
 

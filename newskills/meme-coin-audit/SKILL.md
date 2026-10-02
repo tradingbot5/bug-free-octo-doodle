@@ -2,6 +2,8 @@
 name: meme-coin-audit
 description: Meme coin and token security audit — rug pull detection (honeypot, hidden mint, fee manipulation, LP lock bypass), Solana SPL token analysis (freeze authority, mint authority, metadata mutability), Token-2022 extension risks (transfer hooks, permanent delegate), DEX liquidity pool attacks (sandwich amplification, LP drain, bonding curve exploits), pump.fun/Raydium/Jupiter integration risks, and real exploit examples from 2024-2025. Use for any token audit, rug pull assessment, meme coin security review, or pre-investment due diligence.
 sources: public_research
+category: web3
+related_skills: [web3-audit, hunt-source-leak, offensive-osint]
 ---
 
 # MEME COIN & TOKEN SECURITY AUDIT
@@ -283,6 +285,18 @@ When you don't have source code, check on-chain:
 - **`bb-methodology`** — When confirming engagement mode. Workflow primitive: PART 0 separates "pre-investment due diligence" (this skill's primary use) from "Immunefi bug bounty submission" (different reporting + severity standards); the answer routes which post-audit handoff is correct.
 
 ---
+
+## Rug / Honeypot Checklist (2024-2026)
+
+Mechanical red flags to pull from the contract + on-chain state before anything else:
+- **Authorities not renounced** — ERC-20: `owner`/`mint`/`pause`/`blacklist` still live; Solana SPL: **mint authority** and **freeze authority** not set to null (can mint infinitely / freeze your tokens). This is the #1 rug primitive.
+- **Upgradeable proxy** — logic can be swapped post-launch (EIP-1967 proxy, UUPS/Transparent); treat as "code can change under you".
+- **Honeypot (can buy, can't sell)** — `transfer`/`sell` paths gated by hidden `require`, max-tx/cooldown, or dynamic blacklist; **fee/tax functions** with owner-settable rate up to 100%. Cross-check with honeypot detectors (honeypot.is / Token Sniffer / GoPlus) as *leads*, then verify in source.
+- **Liquidity** — LP not locked/burned (owner can pull), or a tiny LP vs supply; check lock contract + unlock time.
+- **Supply/holders** — dev/deployer wallet holds a dominant share; sniper bundles at launch (pump.fun/bundled buys); hidden `mint` behind a role.
+- **Metadata/verification** — unverified source, mismatched metadata, cloned contract with a one-line malicious diff.
+
+This skill audits **scam/rug mechanics**; for exploitable DeFi protocol bugs (reentrancy, oracle, accounting) use `web3-audit`. Report findings as risk assessment, never as investment advice; don't interact with funds beyond read-only analysis.
 
 ## Operator Notes (Claude-BugHunter)
 

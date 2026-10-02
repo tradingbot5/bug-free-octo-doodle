@@ -3,6 +3,8 @@ name: mid-engagement-ir-detection
 description: Methodology for detecting client SOC patches, attacker activity, and security-state changes that occur DURING a red-team engagement — and converting those observations into deliverable findings. Built from authorized red-team work where the client patched a confirmed SQLi within 30 minutes of detection AND an external attacker locked multiple new accounts during a single test session. Use when (a) running ANY active engagement against a monitored target, (b) a previously-confirmed finding stops reproducing, (c) baseline timing shifts unexpectedly, or (d) you notice response patterns changing during testing.
 sources: authorized-engagement
 report_count: 1
+category: redteam-ops
+related_skills: [redteam-mindset, enterprise-vpn-attack, vmware-vcenter-attack, m365-entra-attack, evidence-hygiene]
 ---
 
 ## When to use this skill
@@ -343,6 +345,15 @@ This is a more valuable deliverable than "I confirmed SQLi" alone, because it ca
 **Your engagement leaves a footprint. The footprint changes the target. Capture both states. Both are findings.**
 
 ---
+
+## Detection-Surface Refresh (2024-2026)
+
+Know what's watching so you stay in scope and read the blue-team's response correctly (this is authorized red-team OPSEC awareness, not evasion advice for unauthorized use):
+- **Endpoint** — EDR/XDR (Defender for Endpoint, CrowdStrike, SentinelOne) via ETW/kernel callbacks + Sysmon; AMSI for script content; script-block logging. Living-off-the-land and signed-binary use is increasingly behavior-detected, not signature-detected.
+- **Identity** — Entra ID Protection / Defender for Identity risk signals (impossible travel, token replay, PRT anomalies), Okta ThreatInsight, conditional-access + CAE revocation mid-session. Token-replay and consent-grant actions now generate high-fidelity alerts.
+- **Cloud** — AWS GuardDuty/CloudTrail, Azure Defender, GCP SCC; API-call anomaly + credential-exfil detections (IMDS access patterns, `GetCallerIdentity` from new ASN).
+- **Network/web** — WAF + CDN bot/anomaly analytics, canary tokens / honeypot accounts / decoy docs (a single canary trip ends stealth).
+- **Posture** — assume full telemetry; prefer low-and-slow, authorized-window actions; coordinate deconfliction with the IR team per RoE; log your own actions for the report.
 
 ## Related Skills & Chains
 

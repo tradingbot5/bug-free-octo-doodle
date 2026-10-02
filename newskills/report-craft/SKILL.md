@@ -12,6 +12,8 @@ description: >
   (redaction), redteam-report-template (client deliverables). Never ship a report that
   scores < 85 or has one unbacked claim.
 sources: operator_experience, community
+category: reporting
+related_skills: [report-writing, bugcrowd-reporting, triage-validation, evidence-hygiene]
 ---
 
 # REPORT-CRAFT — The Ship-Quality Pipeline
@@ -274,6 +276,13 @@ protected pages, including plaintext root credentials.
   "scope?" → host is in the program's domain scope, quoted.
 
 ---
+
+## Reporting Conventions (2024-2026)
+
+- **CVSS 4.0 is now published** — use it where a program requests it (it adds Attack Requirements, User Interaction granularity, and Supplemental/Threat metrics); keep 3.1 when the program's form still expects it. State which version you scored with and show the vector string.
+- **Write for automated triage too** — many programs now run first-pass AI/automated triage. Put the one-line impact, exact endpoint+parameter, and a copy-pasteable PoC up top; precise, machine-parseable repro steps beat prose. A triager (human or model) should reproduce in minutes without guessing.
+- **Map to CWE and the program taxonomy** (Bugcrowd VRT / program severity matrix) explicitly; don't let a form's default severity underrate a real chain.
+- **Lead with the realized impact and the chain**, not the vuln class label; attach minimal, redacted evidence (`evidence-hygiene`) and a clear expected-vs-actual.
 
 ## Related Skills & Chains
 

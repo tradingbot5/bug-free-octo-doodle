@@ -3,6 +3,9 @@ name: m365-entra-attack
 description: Microsoft 365 / Entra ID red-team attack chain — current 2026 reality. AADSTS code reference, user enumeration vectors (with hardening status), Smart Lockout math, Conditional Access bypass options, ROPC + SAML SSO browser flow, Burp/Playwright templates. Built from authorized red-team work where ROPC spray surfaced pre-existing lockouts and CA-blocked credentials, plus real-time external attacker activity correlation. Use for any M365/Entra credential attack, password spray, user enumeration, CA-bypass exploration, or active-attacker-detection scenario.
 sources: authorized-engagement, microsoft-docs, AADInternals
 report_count: 1
+cwe: [CWE-287, CWE-290, CWE-862, CWE-863, CWE-346]
+cvss_baseline: "High-Critical by reach: token/PRT theft or illicit consent → tenant-wide data access or persistence; cross-tenant/Global-Admin paths = Critical. Identity-plane compromise cascades to all M365 data."
+related_skills: [okta-attack, cloud-iam-deep, hunt-oauth, offensive-osint, mid-engagement-ir-detection]
 ---
 
 ## When to use this skill
@@ -374,6 +377,23 @@ go install -v github.com/projectdiscovery/...             # PD toolkit for gener
 Pre-built `m365_validator.py` template at engagement working directory `engagement_log/m365_validator.py`. Adapt the `attempt()` function to your engagement.
 
 ---
+
+## Techniques Refresh (2024-2026)
+
+The identity plane, not the network, is the modern perimeter. Current high-impact paths (authorized testing only):
+- **AiTM phishing + token/session replay** — Evilginx/Tycoon-style reverse-proxy captures the post-MFA session cookie/token → replay bypasses MFA. Pair with device-code phishing (`/common/oauth2/devicecode`).
+- **Illicit consent grant / OAuth app abuse** — trick a user (or admin) into consenting to an attacker multi-tenant app with Graph scopes (`Mail.Read`, `Files.ReadWrite.All`) → persistent data access surviving password reset (the Midnight Blizzard pattern). Enumerate over-privileged service principals and dangling app registrations.
+- **Primary Refresh Token (PRT) theft** — from a compromised/enrolled device → SSO to all Entra apps; `ROADtoken`/`AADInternals`.
+- **Entra Connect / cross-tenant sync abuse** — sync-account creds, Seamless SSO (Silver/Golden SAML on AD FS token-signing cert), PTA agent abuse.
+- **Conditional Access / CAE gaps** — location/device-filter bypass, legacy-auth endpoints (IMAP/POP/EWS/ActiveSync) skipping CA, break-glass accounts.
+- **Enumeration (pre-auth)** — `GetCredentialType`/`autodiscover`/`login.microsoftonline.com` user-validity + tenant recon (AADInternals, o365creeper); feed `offensive-osint`.
+
+**Method:** demonstrate against an authorized tenant with a test identity; capture a token/consent in a controlled app; never access real users' mail/files — show the access primitive, stop at proof.
+
+## Remediation
+
+- Phishing-resistant MFA (FIDO2/passkeys), token-protection/CAE, device compliance in Conditional Access; block legacy auth; restrict user consent to verified publishers + admin-consent workflow.
+- Monitor/limit service-principal credentials and app permissions; protect AD FS token-signing cert and Entra Connect sync account; alert on new OAuth grants, PRT use from new devices, and impossible-travel token replay.
 
 ## Related Skills & Chains
 

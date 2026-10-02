@@ -3,6 +3,8 @@ name: apk-redteam-pipeline
 description: End-to-end Android APK red-team pipeline — automated APK acquisition (Play Store + apkpure + apkmirror fallback), jadx decompilation, secret/URL/JWT/Firebase grep, pinned-cert extraction, exported-component enumeration, Frida runtime instrumentation templates, intent-injection probes. Built from an authorized external red-team engagement where 7 APKs were pulled manually, 4 download attempts truncated, and a hardcoded JWT + 30 internal API endpoints were recovered from one of the apps. Use when target has a mobile app catalogue (Play Store developer page), when you find an APK URL hosted on a web server, or when post-recon mentions "mobile app" in scope.
 sources: authorized-engagement
 report_count: 1
+category: mobile
+related_skills: [ios-redteam-pipeline, hunt-spa-api, hunt-source-leak, hunt-cloud-misconfig, hunt-tls-network]
 ---
 
 ## When to use this skill
@@ -397,6 +399,17 @@ download-apk() {
 - Evidence: extracted strings, decoded JWT, endpoint inventory
 
 ---
+
+## Tooling / Technique Refresh (2024-2026)
+
+- **Static** — `jadx`/`jadx-gui` (decompile), `apktool` (smali/resources), `apkleaks` + trufflehog/gitleaks for secrets, **MobSF** for automated static+dynamic. Inspect `AndroidManifest.xml`: `exported=true` components, `android:allowBackup`, `usesCleartextTraffic`, deeplink/`intent-filter` schemes, custom permissions.
+- **Cross-platform bundles** — **Flutter** → `reflutter` (patch to proxy TLS, which Flutter ignores by default); **React Native** → pull/beautify `index.android.bundle`; **Xamarin/Unity** → decompile the DLLs/IL2CPP.
+- **Dynamic** — Frida 16+ + `objection` (SSL-pinning bypass, root-detection bypass, class hooks), **Medusa** (Frida module framework), `house`; proxy the API through Burp after unpinning (feeds `hunt-spa-api`).
+- **Network-security-config** — `res/xml/network_security_config.xml` trust anchors / pinning; Android 7+ ignores user CAs unless the app opts in — patch the config or use Frida to bypass.
+- **Attack surface** — exported Activities/Services/Receivers/ContentProviders (intent injection, `grantUriPermissions`), `WebView` (`setJavaScriptEnabled`, `addJavascriptInterface`, `file://`/`setAllowFileAccess`), hardcoded endpoints/JWTs/**Firebase** DB URLs (test `/.json` open rules → `hunt-cloud-misconfig`), Janus/signature-scheme notes, `StrictMode` leaks.
+- **Storage** — SharedPreferences/SQLite/`EncryptedSharedPreferences`, external-storage world-readable files, Keystore usage.
+
+Test only on your own device/emulator and apps in authorized scope; stop at proof.
 
 ## Related Skills & Chains
 

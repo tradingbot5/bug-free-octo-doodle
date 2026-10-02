@@ -3,6 +3,8 @@ name: ios-redteam-pipeline
 description: End-to-end iOS red-team pipeline — IPA acquisition (App Store extraction, TestFlight, enterprise/ad-hoc sideload), class-dump/Hopper/Ghidra static analysis, Info.plist + entitlements + Keychain secret extraction, App Transport Security (ATS) misconfig + certificate-pinning bypass (frida-ios-dump, objection, SSL Kill Switch 2), URL-scheme / Universal Link hijack, exported-service enumeration, Frida runtime instrumentation. Companion to apk-redteam-pipeline for the iOS side of a mobile app catalogue. Use when target has an iOS app (App Store listing, TestFlight link, enterprise MDM distribution), when an IPA URL is found hosted on a web server, or when post-recon mentions "iOS app" / "mobile app" in scope alongside an Apple developer account.
 sources: public_research, frida_docs, objection_docs, owasp_mastg
 report_count: 0
+category: mobile
+related_skills: [apk-redteam-pipeline, hunt-spa-api, hunt-source-leak, hunt-tls-network, cloud-iam-deep]
 ---
 
 ## When to use this skill
@@ -268,6 +270,17 @@ pip install --break-system-packages frida-tools objection iphone_backup_decrypt
 ```
 
 ---
+
+## Tooling / Technique Refresh (2024-2026)
+
+- **Jailbreak landscape** — rootless (Dopamine/`palera1n` rootless) for A12-A15/iOS 15-16; newer iOS often needs a **non-jailbroken** flow: re-sign the IPA and inject a Frida gadget (`objection patchipa` / `frida-gadget`) + sideload via **TrollStore** (where the CoreTrust bug applies) or a dev cert.
+- **Instrumentation** — Frida 16+, `objection` (jobs: SSL-pinning bypass, Keychain dump, class/method hooks), `r2frida`, **Grapefruit** (web UI for runtime file/Keychain/NSUserDefaults inspection), `frida-ios-dump` to pull a decrypted app binary.
+- **Static** — `ipatool`/`ipainstaller` to fetch, `class-dump`/Hopper/Ghidra, `strings` + secret scan on the decrypted `Mach-O`; inspect `Info.plist` (ATS exceptions, URL schemes), embedded provisioning profile, `.mobileprovision`.
+- **Storage/transport** — Keychain accessibility classes, NSUserDefaults/plist/SQLite/Realm at rest, pasteboard leakage, ATS downgrade; **SSL-pinning bypass** via objection/`SSLKillSwitch3` then proxy the API (feeds `hunt-spa-api`, `hunt-tls-network`).
+- **Attack surface** — custom URL schemes & Universal Links (deeplink injection), app extensions, `WKWebView` `javaScriptEnabled`/file access, exported `NSXPC` services, hardcoded endpoints/keys (feeds `hunt-source-leak`).
+- **Reference** — OWASP **MASTG/MASVS** test IDs for a structured, reportable methodology.
+
+Test only on your own device/test accounts and apps in authorized scope.
 
 ## Related Skills & Chains
 

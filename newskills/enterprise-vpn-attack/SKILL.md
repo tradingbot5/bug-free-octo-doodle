@@ -3,6 +3,9 @@ name: enterprise-vpn-attack
 description: External SSL VPN / remote-access appliance attack matrix — Cisco ASA/AnyConnect, Fortinet FortiGate/FortiOS, Citrix NetScaler/ADC, Palo Alto GlobalProtect, Pulse Secure / Ivanti Connect Secure, SonicWall, F5 Big-IP. Covers version fingerprinting, CVE matrix (2018-2026), AAA backend identification, default credentials, configuration-disclosure paths, pre-auth RCE/SSRF/path-traversal exploits where applicable. Built from authorized-engagement Cisco ASA testing plus 2024-2026 enterprise VPN CVE landscape. Use whenever the target's perimeter exposes any SSL VPN appliance or remote-access gateway — these are the most common initial-access points in 2024-2026 actor TTPs.
 sources: authorized-engagement, public-advisories, cisa-kev
 report_count: 1
+cwe: [CWE-918, CWE-22, CWE-287, CWE-78, CWE-306]
+cvss_baseline: "Critical (9.8) pre-auth RCE / auth-bypass on an edge VPN appliance (initial access); High (8.1) session-token/config disclosure. These are the top real-world initial-access vectors 2023-2026."
+related_skills: [cloud-iam-deep, hunt-ssrf, hunt-source-leak, recon-scope-triage, mid-engagement-ir-detection]
 ---
 
 ## When to use this skill
@@ -346,6 +349,23 @@ Add `-as` (auto-scan) for broader vuln coverage but slower.
 - **Don't skip SAML metadata** — even when the appliance is patched, SAML SP misconfig is its own attack surface
 
 ---
+
+## Priority CVE Refresh (2023-2026) — the actively-exploited edge
+
+Fingerprint the appliance/version first, then match. All of these are CISA-KEV, mass-exploited for initial access:
+- **Ivanti Connect Secure / Policy Secure** — CVE-2023-46805 (auth bypass) + CVE-2024-21887 (command injection) **chained → unauth RCE**; CVE-2024-21893 (SSRF); **CVE-2025-0282** (stack overflow pre-auth RCE); CVE-2025-22457.
+- **Fortinet FortiOS/FortiGate SSL-VPN** — CVE-2024-21762 (out-of-bounds write, pre-auth RCE); CVE-2024-55591 / CVE-2025-24472 (auth bypass to super-admin via Node.js websocket).
+- **Palo Alto PAN-OS GlobalProtect** — CVE-2024-3400 (command injection, unauth RCE; telemetry/`SESSID` path).
+- **Citrix NetScaler ADC/Gateway** — CVE-2023-4966 **"CitrixBleed"** (session-token memory disclosure → MFA bypass via session hijack); **CVE-2025-5777 "CitrixBleed 2"** (uninitialized memory read); CVE-2023-3519 (pre-auth RCE).
+- **SonicWall SMA/SSL-VPN** — CVE-2024-40766 (access-control); legacy SMA100 chains.
+- **Cisco ASA/FTD** — VPN web services path traversal/DoS; brute-forceable AnyConnect realms.
+
+**Method:** version banner / favicon / login-page fingerprint → CVE match → reproduce the disclosed primitive against the authorized target → for RCE, confirm with a benign OOB callback, never a destructive payload; CitrixBleed-class = repeatedly read memory for a valid session token, then show session reuse (minimal).
+
+## Remediation
+
+- Patch to fixed versions immediately (these are KEV); after CitrixBleed/CitrixBleed2 and Ivanti RCE, **terminate all sessions and rotate secrets** — patching doesn't evict a stolen token.
+- Put admin/management interfaces off the public internet; enforce phishing-resistant MFA and device posture; monitor the vendor IOC/integrity-checker tools; restrict appliance egress.
 
 ## Related Skills & Chains
 

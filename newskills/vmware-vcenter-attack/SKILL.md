@@ -3,6 +3,9 @@ name: vmware-vcenter-attack
 description: VMware vSphere / vCenter Server external attack matrix — version fingerprinting, the high-impact CVE chain (CVE-2021-21972 vRealize unauth file upload, CVE-2021-21985 vSAN plugin RCE, CVE-2022-22954 Workspace ONE SSTI, CVE-2023-20887 Aria RCE, CVE-2024-37085 ESXi AD bypass, CVE-2023-34048 vCenter DCERPC OOB write APT-exploited), default credentials, SSO configuration disclosure, vmdir LDAP enumeration, ESXi Open SLP RCE history. ONLY for vCenter / Workspace ONE / Aria instances exposed to the internet — internal-network vCenter is out of scope per the external-only boundary. Use when recon shows port 443 with vCenter banner, `/ui` redirect, `/websso/SAML2/Metadata`, or VMware product fingerprints.
 sources: vmware-security-advisories, public-cve-databases, redteam-knowledge, disclosed-cves, cisa-kev, mandiant-zdi-writeups
 report_count: 10
+cwe: [CWE-502, CWE-787, CWE-306, CWE-287, CWE-78]
+cvss_baseline: "Critical (9.8) pre-auth vCenter/ESXi RCE or ESXi AD auth bypass → full virtualization-plane compromise; High (8.x) authenticated escalation. vCenter RCE = game-over for the estate."
+related_skills: [cloud-iam-deep, enterprise-vpn-attack, mid-engagement-ir-detection, hunt-source-leak]
 ---
 
 ## When to use
@@ -361,6 +364,21 @@ These are the load-bearing public references for every CVE called out in the mat
 - **References:** https://www.vmware.com/security/advisories/VMSA-2022-0021.html ; https://www.greynoise.io/blog/vmware-workspace-one-vulnerabilities-cve-2022-31656-and-cve-2022-31659 ; https://attackerkb.com/topics/RuMGC8Q1pE/cve-2022-31656
 
 ---
+
+## Priority CVE Refresh (2023-2026)
+
+Fingerprint the vCenter/ESXi build (`/sdk`, `/ui`, login banner) → match:
+- **vCenter DCE/RPC pre-auth RCE** — **CVE-2023-34048** (out-of-bounds write, exploited in the wild by UNC3886); **CVE-2024-37079 / CVE-2024-37080** (DCERPC heap overflow RCE); **CVE-2024-38812** (DCERPC heap overflow, pre-auth RCE, 2024) + CVE-2024-38813 (local privesc).
+- **vCenter classic** — CVE-2021-21972 (vSphere Client plugin unauth RCE), CVE-2021-21985 (vSAN plugin RCE), CVE-2022-22954-class SSRF/SSTI on Workspace ONE Access (adjacent).
+- **ESXi** — **CVE-2024-37085** (AD "ESX Admins" group auth bypass → ransomware operators' favorite), OpenSLP **CVE-2021-21974** (ESXiArgs ransomware), CVE-2020-3992.
+- **Post-access**: `vpxuser`/SSO extraction, `vmdir` dump, `vCenter` → ESXi host takeover → clone/snapshot-exfil VMs, and AD takeover via extracted machine accounts.
+
+**Method:** reproduce the disclosed primitive against the authorized target; for RCE confirm with a benign OOB callback; for ESXi AD bypass demonstrate the group-grant path in a lab — do not touch production VMs/snapshots.
+
+## Remediation
+
+- Patch vCenter/ESXi to fixed builds (all KEV); isolate the management plane on a dedicated network, no internet exposure; disable OpenSLP where unused.
+- For CVE-2024-37085, control the `ESX Admins` AD group / use `esxAdminsGroup` hardening; rotate SSO/`vpxuser`/machine-account secrets after any suspected compromise; enable lockdown mode + execInstalledOnly.
 
 ## Key meta-references (cross-CVE)
 

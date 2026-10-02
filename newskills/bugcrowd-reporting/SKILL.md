@@ -2,6 +2,8 @@
 name: bugcrowd-reporting
 description: "Bugcrowd-specific reporting tactics complementing report-writing: VRT category search-and-fallback strategy when no exact match exists, manual severity override when VRT defaults underrate impact, severity-request paragraph as first body section, OOS-clause rebuttal templates (rate limiting on auth-flow endpoints, debug-info framing, user-enumeration with sensitive PII, theoretical-issue counter), chained-finding cross-reference patterns, target selection for QA-vs-prod programs, researcher-side hygiene (Bugcrowdninja email alias, account state restoration, friendly-tester posture). Use when filing a Bugcrowd submission, when VRT default seems wrong, when triager closes as OOS or downgrades severity, when chaining linked submissions, or when scope distinguishes production from QA. Pairs with report-writing and triage-validation."
 sources: bugcrowd, community
+category: reporting
+related_skills: [report-writing, report-craft, triage-validation, evidence-hygiene]
 ---
 
 # BUGCROWD REPORTING — Program-Specific Tactics
@@ -313,6 +315,11 @@ Maintain a simple text file with each submission's UUID, severity, and one-line 
 This skill is small and focused. It does NOT duplicate content from `report-writing` (per-platform templates, CVSS scoring, downgrade counters, 60-second pre-submit checklist) — load both skills together when filing a Bugcrowd report. The two skills' content composes naturally because their boundaries are clean: `report-writing` is the body templates, `bugcrowd-reporting` is the program-specific tactics layered on top.
 
 ---
+
+## Convention note (2024-2026)
+
+- Map every submission to the current **Bugcrowd VRT**; when the VRT default underrates the real impact, request the override with a CVSS vector — Bugcrowd accepts **CVSS 3.1** and increasingly **CVSS 4.0**, so include the full vector string and say which version. Lead the body with the severity-request paragraph.
+- Expect an automated/AI first-pass triage: put impact, exact endpoint/param, and a copy-pasteable PoC at the top so both a bot and a human can reproduce fast.
 
 ## Related Skills & Chains
 

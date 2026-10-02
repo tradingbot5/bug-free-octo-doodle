@@ -3,6 +3,9 @@ name: okta-attack
 description: Okta-as-IdP red-team attack chain — tenant discovery, user enumeration (multiple vectors), authentication flow analysis (factors enumeration, push-notification fatigue, SMS bypass), password spray with lockout discipline, Okta-specific phishing primitives (kits, FastPass abuse, OIDC redirect_uri tampering), MFA enumeration, post-compromise admin API surface. Many enterprise orgs use Okta instead of (or alongside) Entra ID. Distinct endpoints, distinct rate-limiting, distinct factor flows. Use when recon shows `<tenant>.okta.com`, `<tenant>.okta-emea.com`, `<tenant>.oktapreview.com`, or autodiscover-style records pointing at Okta IdP.
 sources: public-okta-docs, idp-redteam-knowledge, disclosed-incidents
 report_count: 8
+cwe: [CWE-287, CWE-306, CWE-290, CWE-384]
+cvss_baseline: "High-Critical by reach: session-token theft / admin impersonation / inbound-federation abuse → tenant-wide SSO compromise. IdP takeover cascades to every downstream app."
+related_skills: [m365-entra-attack, cloud-iam-deep, hunt-oauth, hunt-saml, offensive-osint]
 ---
 
 ## When to use this skill
@@ -387,6 +390,23 @@ These are the canonical public references that justify the techniques in this sk
 - For red-team scoping: HAR-file replay, inbound-federation IdP injection, and stealer-cookie replay are the three highest-yield post-recon primitives observed in the wild.
 
 ---
+
+## Techniques Refresh (2023-2026)
+
+Grounded in the disclosed Okta incidents (authorized testing only):
+- **HAR-file / support-session token theft** — the Oct 2023 support-system breach: uploaded HAR files contained live session tokens → cross-customer session hijack. Lesson: **HAR and admin session tokens are crown jewels** (cross-ref `evidence-hygiene` for redaction).
+- **AiTM phishing + session replay** and **MFA fatigue/push-bombing** (the Lapsus$/Scattered Spider pattern) → session cookie replay bypasses MFA; help-desk social-engineering to reset MFA.
+- **Inbound federation / delegated-auth abuse** — add or abuse an inbound IdP / Org2Org to impersonate users across tenants; SAML/`hunt-saml` assertion issues at the Okta boundary.
+- **CVE-2024-0000-class auth gaps** — the Oct 2024 **AD/LDAP DelAuth bcrypt bug** (usernames ≥52 chars could authenticate with a cached key under conditions); Okta Verify/FastPass edge cases; classic-engine admin surfaces.
+- **SCIM / API-token abuse** — over-scoped SSWS API tokens or SCIM provisioning creds → user/group manipulation, backdoor admin creation.
+- **Enumeration** — `/api/v1/*`, login-flow user-validity differences, org-URL/tenant recon → feed `offensive-osint`.
+
+**Method:** test against an authorized org/tenant with a test user; demonstrate the token-replay or impersonation primitive minimally; never touch real customers' sessions.
+
+## Remediation
+
+- Phishing-resistant FastPass/FIDO2; bind sessions to device/network; short session lifetimes + reauth for admin; number-matching, disable SMS/push-only.
+- Treat HAR/admin tokens as secrets (never upload unredacted); scope and rotate API tokens; restrict/monitor inbound federation and SCIM; alert on new admin, new IdP, and anomalous session reuse; keep the Okta agent/connectors patched.
 
 ## Related Skills & Chains
 

@@ -390,6 +390,14 @@ Drop these prompts into a fresh Claude session to verify the skill loads correct
 
 ---
 
+## Source / Tooling Refresh (2024-2026)
+
+- **Breach & credential intel** — DeHashed, HaveIBeenPwned, IntelX, LeakCheck, Snusbase for exposed creds tied to in-scope domains (feed `hunt-brute-force` credential-stuffing *only* within authorized scope and program rules).
+- **Infra discovery** — Shodan/Censys/FOFA (favicon-hash, `http.html`, cert pivots), `crt.sh`/CT logs, `subfinder`/`amass`, DNSDumpster; corroborate ownership via `recon-scope-triage` before acting.
+- **Code & secret exposure** — GitHub/GitLab dorking + `trufflehog`/`gitleaks`, public Postman workspaces, npm/PyPI internal package names (dependency-confusion leads), S3/bucket enumeration.
+- **People/org** — LinkedIn/role enumeration for email-format derivation and social-engineering surface (red-team RoE only); feed identity attacks (`m365-entra-attack`, `okta-attack`).
+- **Discipline** — OSINT is passive recon; stay within scope, don't engage targets, and treat all collected data per the program's privacy rules.
+
 ## Related Skills & Chains
 
 - **`web2-recon`** — When the arsenal needs to be executed against a live host set. Workflow primitive: this skill provides the probe paths and wordlists; `web2-recon` runs the actual subfinder → dnsx → httpx → katana pipeline that consumes them.
