@@ -3,6 +3,9 @@ name: hunt-brute-force
 description: "Hunt Missing/Weak Rate Limiting — login brute force, OTP/2FA brute force (10^6 keyspace), password-reset-token brute, credential stuffing, username/email enumeration via error-string / status-code / timing differences, weak password policy, missing CAPTCHA (CAPTCHA token replay / single-use / concurrency-window bypass specifics → hunt-captcha-bypass), IP-based rate-limit bypass via X-Forwarded-For and friends, ReDoS. Distinguishes hard lockout vs soft IP-throttle vs CAPTCHA-injection vs silent shadow-throttling (avoids false-negative 'no rate limit' conclusions). Medium to Critical depending on what the brute reaches (OTP→ATO = Critical)."
 sources: public_research
 report_count: 6
+cwe: [CWE-307, CWE-799, CWE-287, CWE-203]
+cvss_baseline: "Low-Medium standalone missing-rate-limit → High (7.5-8.1) when the brute reaches credentials/OTP/reset-token and yields ATO. Severity tracks what the brute reaches, not the 429's absence alone."
+related_skills: [hunt-captcha-bypass, hunt-mfa-bypass, hunt-forgot-password, hunt-ato, hunt-race-condition]
 ---
 
 # HUNT-BRUTE-FORCE — Rate Limiting / Brute Force / Enumeration
@@ -267,6 +270,29 @@ nuclei -u "https://$TARGET" -t http/fuzzing/ -t http/default-logins/ -severity m
 | Hard lockout triggerable by attacker | Targeted account DoS (lock victim out) | Medium |
 
 ---
+
+## New Techniques (2024-2026)
+
+### Rate-limit bypass surface (test before concluding "no limit")
+- **IP-spoofing headers** — `X-Forwarded-For`, `X-Real-IP`, `X-Client-IP`, `X-Originating-IP`, `True-Client-IP`, `CF-Connecting-IP`; rotate per request to reset per-IP counters.
+- **Identifier mutation** — username case (`Admin` vs `admin`), trailing dot/space/null (`admin%00`), unicode-fold, email `+tag`, or alternate param so the counter keys differently.
+- **Endpoint/variant** — mobile/API/GraphQL login path without the web limiter; HTTP/2 concurrency; **GraphQL alias brute** (hundreds of `login` aliases in one request).
+- **Counter resets** — re-request a new OTP to zero the attempts, or switch factor.
+
+### Modern attack shapes
+- **Password spraying** (one common password × many users, low-and-slow) beats per-account lockout.
+- **Credential stuffing** with breach combolists against accounts that lack MFA.
+- **Timing/response-based user enumeration** (valid vs invalid differ in length/status/latency) to shrink the keyspace first.
+- **OTP/reset-token brute** (10^4-10^6 keyspace) — cross-ref `hunt-mfa-bypass`, `hunt-forgot-password`; concurrency window = `hunt-race-condition`.
+
+### Distinguishing throttle types (avoid false "no limit")
+Hard lockout vs soft IP-throttle vs CAPTCHA-injection vs silent shadow-throttle (accepts but never succeeds). Confirm a *correct* credential still works mid-test, or you'll misreport.
+
+## Remediation
+
+- Rate-limit AND lockout per-account and per-IP (derive client IP from the trusted proxy only — ignore client `X-Forwarded-For`); exponential backoff + CAPTCHA after N failures.
+- Enforce MFA and breach-password checks; generic identical responses/timing for valid vs invalid; cap OTP attempts and bind/expire tokens.
+- Apply limits uniformly across web/mobile/API/GraphQL; cap GraphQL alias/batch counts; detect spraying/stuffing (velocity across many accounts).
 
 ## Validation — false-positive discipline
 

@@ -3,6 +3,9 @@ name: hunt-session
 description: "Hunt Session Management vulnerabilities — session fixation (no regeneration on login), insufficient invalidation on logout / password-change / email-change, predictable or low-entropy session IDs, JWT-as-session with no exp/revocation, refresh-token rotation/reuse-detection gaps, OAuth/SSO session linkage, device-bound-session (DBSC) downgrade, and cookie attribute issues (Secure/HttpOnly/SameSite/__Host-). Validate with TWO real sessions (attacker A + victim B), body-diff every 200, and OOB confirmation for theft chains. Medium to Critical (fixation→admin hijack, no-invalidation→persistent ATO)."
 sources: hackerone_public, portswigger_research, owasp_wstg
 report_count: 18
+cwe: [CWE-384, CWE-613, CWE-539, CWE-614, CWE-287]
+cvss_baseline: "Medium (5-6) weak flags/expiry → High (7.5-8.1) fixation, no-invalidation-on-password-change, or stealable long-lived token → Critical when it yields persistent ATO."
+related_skills: [hunt-ato, hunt-auth-bypass, hunt-jwt-crypto, hunt-mfa-bypass, hunt-csrf]
 ---
 
 ## Autonomous Testing Priority
@@ -279,6 +282,27 @@ Hand OAuth `state`/`redirect_uri`/code-injection to `hunt-oauth`; this phase onl
 | Predictable ID | Compute/brute another user's session | Cross-user ATO |
 
 ---
+
+## New Techniques (2024-2026)
+
+### The invalidation matrix (where real bugs cluster)
+Test what *survives* events that should kill a session:
+- **No rotation on login** → session fixation: set a known session pre-auth, victim logs in on it, attacker reuses it.
+- **No invalidation on logout / password change / email change / MFA-enroll** → stolen/old session stays live (the most common High-severity session bug).
+- **Concurrent sessions never revoked**, **"log out all devices" doesn't**, **remember-me token non-rotating / non-expiring**.
+- **JWT "sessions" with no server-side revocation** → can't be killed until expiry; long `exp` = persistent ATO (cross-ref `hunt-jwt-crypto`).
+
+### Token strength & exposure
+Predictable/sequential/low-entropy IDs; session token in URL (leaks via Referer/history/logs); missing `Secure`/`HttpOnly`/`SameSite`; overly broad cookie `Domain` (sibling-subdomain theft); refresh tokens that outlive revocation; OAuth refresh longevity.
+
+### Theft → fixation chains
+XSS/subdomain-XSS → cookie theft (if not HttpOnly) → replay; CSWSH/CSRF to set a fixed session; cookie-tossing from a sibling subdomain. Prove reuse of the captured/fixed session as the victim.
+
+## Remediation
+
+- Rotate the session ID on every privilege change (login, step-up); invalidate server-side on logout, password/email change, and MFA changes; support real "revoke all sessions".
+- High-entropy opaque IDs (or short-lived JWT + a server-side revocation list); `Secure; HttpOnly; SameSite=Lax/Strict`; narrowest cookie `Domain`/`Path`; never put tokens in URLs.
+- Idle + absolute timeouts; rotate and bind remember-me tokens; cap/track concurrent sessions.
 
 ## Validation (house FP discipline)
 

@@ -1,8 +1,11 @@
 ---
 name: hunt-sharepoint
 description: Hunt Microsoft SharePoint Server (2013/2016/2019/Subscription Edition) on-prem farms — anonymous endpoint enumeration, version disclosure, legacy SOAP login bypass (Authentication.asmx), ToolShell precondition chain (CVE-2025-53770), SafeControl reflection enumeration via Picker.aspx, NTLM Type-2 AD topology disclosure, custom-branding module discovery, EoL farm permanent-CVE-window exploitation, FormDigest anonymous issuance, file-extension blocklist NOT-an-oracle pattern, custom-zone Forms auth bridging on-prem AD. Use when target has SharePoint headers (SPRequestGuid, X-MS-InvokeApp, X-SharePointHealthScore, MicrosoftSharePointTeamServices) or paths (/_layouts/15/, /_vti_bin/, /_api/, /_catalogs/).
-sources: github, authorized-engagement
+sources: github, authorized-engagement, cve_database, cisa_kev
 report_count: 1
+cwe: [CWE-502, CWE-287, CWE-611, CWE-306]
+cvss_baseline: "High (8.1) auth bypass / info disclosure → Critical (9.8) unauth ViewState-deserialization RCE (ToolShell CVE-2025-53770). On-prem SharePoint RCE is near-always Critical."
+related_skills: [hunt-aspnet, hunt-deserialization, hunt-source-leak, hunt-ntlm-info, hunt-rce]
 ---
 
 ## Crown Jewel Targets
@@ -427,6 +430,25 @@ Same target. Feeding `Microsoft.SharePoint.WebPartPages.DataFormWebPart` (the ca
 - **Engagement-type confirmation before treating hygiene findings as bug-bounty submissions** → see `bb-methodology` PART 0 Mode-Confirmation Gate.
 
 ---
+
+## New Techniques / CVEs (2024-2026)
+
+### ToolShell (CVE-2025-53770 / CVE-2025-53771) — unauth RCE, actively exploited
+The dominant 2025 on-prem SharePoint chain: an auth-bypass + **ViewState deserialization** that yields unauthenticated RCE, mass-exploited in the wild (CISA KEV). It also enabled theft of the server's **ASP.NET machineKey**, so patched servers stayed compromised until keys were rotated. If the target is on-prem SharePoint 2016/2019/Subscription Edition, fingerprint the build and check patch state; treat a reachable `/_layouts/15/ToolPane.aspx` (Referer trick) as the exploited surface.
+```
+POST /_layouts/15/ToolPane.aspx?DisplayMode=Edit  (Referer: /_layouts/SignOut.aspx)  → ViewState gadget
+```
+
+### The 2023 chain still live on unpatched farms
+**CVE-2023-29357** (JWT auth bypass → admin) + **CVE-2023-24955** (SSTI/command → RCE); **CVE-2019-0604** (unauth RCE). Any leaked/stolen **machineKey** (web.config disclosure, `hunt-source-leak`) → forge a signed ViewState payload (ysoserial.net, see `hunt-aspnet`) → RCE even post-ToolShell-patch if keys weren't rotated.
+
+### Enumeration & lower-impact
+`/_vti_bin/` web services, `/_api/web/` REST (list/site enumeration, sometimes anon), `/_layouts/15/` page inventory, user/people-picker enumeration, open document libraries. NTLM leak via these endpoints → `hunt-ntlm-info`.
+
+## Remediation
+
+- Apply the ToolShell patches AND **rotate the ASP.NET machineKey** afterward (patching alone doesn't evict an attacker who stole the key); enable AMSI full mode.
+- Patch CVE-2023-29357/24955 and CVE-2019-0604; keep ViewState MAC on with rotated keys; restrict/authenticate `/_layouts`/`/_vti_bin`/`/_api`; put on-prem SharePoint behind a pre-auth gateway where possible.
 
 ## Related Skills & Chains
 

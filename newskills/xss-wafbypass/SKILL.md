@@ -1,4 +1,15 @@
-SKILL: Comprehensive Manual XSS Discovery, Exploitation & WAF Bypass
+---
+name: xss-wafbypass
+description: "Comprehensive manual XSS discovery, exploitation, and WAF bypass — a context-first, parsing-discrepancy methodology (the WAF and backend are different parsers). Covers HTML/attribute/JS/URL/CSS context mapping, polyglots, charset/encoding evasion, mutation XSS, and protocol-level evasions grounded in WAFFLED (ACSAC 2025) and WAF Manis (IEEE S&P 2024). Use when a WAF blocks XSS payloads, when you need context-specific exploitation, or when confirming execution (not just reflection). For non-WAF reflected/stored XSS methodology see hunt-xss; this skill owns the WAF-evasion layer."
+sources: waffled_acsac_2025, wafmanis_ieee_sp_2024, portswigger_research, public_research
+report_count: 0
+cwe: [CWE-79, CWE-116, CWE-80]
+cvss_baseline: "Medium (6.1) reflected under-WAF → High (7.5-8.1) stored / same-origin token theft once execution is confirmed. A bypassed WAF with no confirmed JS execution is not a finding."
+related_skills: [hunt-xss, hunt-dom, hunt-html-injection, hunt-waf, hunt-cache-poison]
+---
+
+# XSS WAF Bypass — Manual Discovery, Exploitation & WAF Bypass
+
 A structured, context-first methodology for finding and exploiting XSS in any modern web application, under any WAF, in any condition — using only the browser, a proxy, and your own reasoning.
 
 Core Philosophy

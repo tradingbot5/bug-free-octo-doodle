@@ -3,6 +3,9 @@ name: hunt-subdomain
 description: Hunting skill for subdomain takeover vulnerabilities. Includes modern provider fingerprints — Microsoft Azure DevOps `cloudapp.azure.com` regional-pool re-issue (1-click OAuth ATO via wildcard `reply_to`, Binary Security), Zendesk help-desk takeover → email interception → password reset chain (0xprial writeup), Vercel `cname.vercel-dns.com` deleted-project takeover, plus general Fastly CDN service re-attach and S3 dangling-bucket cookie-scope techniques. Use when hunting subdomain takeover — emphasis on ATO-chain primitives (OAuth `redirect_uri`, cookie-domain, email DNS).
 sources: github, hackerone_public, binarysecurity_research, can-i-take-over-xyz_research
 report_count: 3
+cwe: [CWE-350, CWE-16, CWE-284]
+cvss_baseline: "High (7.4-8.1) subdomain takeover enabling cookie/session theft, OAuth redirect, or CSP/same-site bypass → Critical when it directly yields ATO. Dangling record with no claimable service = Informational."
+related_skills: [recon-scope-triage, hunt-oauth, hunt-cors, hunt-cache-poison, hunt-cloud-misconfig]
 ---
 
 ## Crown Jewel Targets
@@ -324,6 +327,29 @@ Cross-references:
 - `offensive-osint` email-security section — Chain 5
 
 ---
+
+## New Techniques (2024-2026)
+
+### Takeover fingerprinting (dangling CNAME → claimable service)
+Resolve every subdomain, find CNAMEs pointing at a service whose resource was deleted but the DNS record remains, then claim it. Canonical fingerprints (verify against can-i-take-over-xyz):
+```
+NoSuchBucket (S3) / BucketNotFound (GCS) / AzureBlob 404  → claim the bucket/container name
+"There isn't a GitHub Pages site here"                    → claim the repo + CNAME
+Heroku "No such app" / Fastly 500 / Netlify / Vercel 404  → claim the app
+"Domain not configured" on SaaS (Shopify, Zendesk, Help Scout, Cargo, Webflow, Surge, Tilda, etc.)
+```
+Tools: `subzy`, `nuclei -t http/takeovers/`, `can-i-take-over-xyz` matrix. **NS/zone takeover** (dangling NS delegation) and **dangling A → reclaimable cloud IP** are higher impact (whole-zone control / IP reuse).
+
+### Why severity is often higher than "defacement"
+A takeover of `*.target.com` becomes ATO/data theft when it enables: cookie-setting/reading on a shared parent domain (session fixation/theft), an allowlisted **OAuth `redirect_uri`** or **CORS origin** (`hunt-oauth`, `hunt-cors`), a CSP `script-src` host, or email/SPF trust. Always chain the takeover to one of these, don't stop at "I control the page."
+
+### Second-order & adjacent
+Broken-link hijacking (dead JS/CDN host referenced by live pages), dangling MX/SPF includes, and expired external dependencies. Confirm ownership scope first (`recon-scope-triage`) — don't claim a third party's dangling record.
+
+## Remediation
+
+- Remove DNS records when the backing resource is decommissioned (deprovision DNS before the service); monitor for dangling CNAME/NS/A continuously.
+- Use verified-ownership domains on SaaS; avoid wildcard CNAMEs to third parties; alert on NXDOMAIN/claimable-service responses for owned records.
 
 ## Related Skills & Chains
 

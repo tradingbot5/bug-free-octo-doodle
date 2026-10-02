@@ -3,6 +3,9 @@ name: hunt-tls-network
 description: "Hunt TLS/SSL and DNS misconfigurations — missing HSTS (downgrade attack), weak cipher suites, expired/invalid certificates, mTLS bypass, missing SPF/DKIM/DMARC (email spoofing), DNS Zone Transfer (AXFR), dangling CNAME subdomain takeover, CAA records. Most of these are Info/Low on their own — this skill is opinionated about which findings actually pay (spoofable DMARC with delivered-to-inbox proof, AXFR returning internal hosts, dangling-CNAME takeover) versus which get rejected as best-practice noise (missing CAA, missing HSTS with no MitM position). Use during recon to find infrastructure weaknesses, and to TRIAGE them honestly before reporting."
 report_count: 6
 sources: portswigger_research, ssl_labs_research, hstspreload_org
+cwe: [CWE-295, CWE-326, CWE-319, CWE-757]
+cvss_baseline: "Mostly Low/Informational on web bug-bounty (weak cipher/missing HSTS) unless it enables a concrete MitM/downgrade with impact. Medium-High only with a demonstrated interception or cert-validation bypass. Calibrate — don't inflate scanner output."
+related_skills: [hunt-host-header, hunt-subdomain, recon-scope-triage, apk-redteam-pipeline]
 ---
 
 # HUNT-TLS-NETWORK — TLS/SSL & DNS Security
@@ -332,6 +335,28 @@ curl -s "https://dmarcian.com/dmarc-inspector/?domain=$TARGET" 2>/dev/null
 ```
 
 ---
+
+## New Techniques / Context (2024-2026)
+
+### What actually pays vs what's noise
+Most TLS findings are **Informational** on bug-bounty programs (and frequently out-of-scope). Report-worthy only when chained to real impact:
+- **Certificate validation flaws** in a client (mobile app/API consumer accepting any cert / no pinning) → MitM of real traffic. Pair with `apk-redteam-pipeline` / `ios-redteam-pipeline`.
+- **HSTS missing + no redirect / not preloaded on auth hosts** → SSL-strip MitM on first visit (Medium at best, context-dependent).
+- **Mixed content / `http://` form post / cookie without `Secure`** → credential/session interception.
+- **`STARTTLS` stripping** on mail/submission endpoints.
+
+### Named issues worth checking
+- **Terrapin (CVE-2023-48795)** — SSH transport prefix-truncation downgrade (for SSH surfaces in scope).
+- Legacy protocol/cipher: SSLv3/TLS1.0/1.1, RC4, export/`NULL`, insecure renegotiation, Logjam/FREAK on ancient stacks (usually Info).
+- **Certificate Transparency** as *recon* (crt.sh) to find hosts/scope, not as a finding — feed `hunt-subdomain`/`recon-scope-triage`.
+
+### Tooling
+`testssl.sh`, `sslscan`, `nmap --script ssl-enum-ciphers`; for mobile pinning bypass use Frida/objection (authorized, your own test device).
+
+## Remediation
+
+- TLS 1.2+ only (prefer 1.3), strong cipher suites, OCSP stapling; `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload` on all HTTPS hosts + HTTP→HTTPS redirect.
+- `Secure`+`HttpOnly`+`SameSite` cookies; no mixed content; proper cert validation and pinning in mobile/API clients; patch SSH for Terrapin.
 
 ## Validation
 

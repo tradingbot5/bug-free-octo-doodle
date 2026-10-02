@@ -3,6 +3,9 @@ name: hunt-idor
 description: Hunting skill for idor vulnerabilities. Built from 26 public bug bounty reports. Use when hunting idor on any target.
 sources: github, hackerone_public
 report_count: 39
+cwe: [CWE-639, CWE-284, CWE-863, CWE-566]
+cvss_baseline: "Medium (5.3) single-object cross-user read → High (7.5-8.1) write/delete or bulk PII → Critical (9.1-9.8) cross-tenant mass extraction or IDOR→ATO chain."
+related_skills: [hunt-api-authz, hunt-graphql, hunt-ato, hunt-spa-api, hunt-api-misconfig, triage-validation]
 ---
 
 ## Crown Jewel Targets
@@ -379,6 +382,28 @@ Cross-references:
 - `hunt-business-logic` — Chain 6
 
 ---
+
+## New Techniques / Tooling (2024-2026)
+
+### Defeating "unguessable" UUID/GID defenses
+UUIDs don't fix IDOR — they just move the ID. Harvest them: list/search/export endpoints, notification emails, webhooks, `Location` headers, embedded in other objects, GraphQL responses, and JS/RSC payloads. **GraphQL `node(id:)`/Relay global IDs** (base64 `Type:n`) are enumerable once decoded. Then replay the harvested ID cross-user.
+
+### Modern variants to always try
+- **Blind/write IDOR** — state change with no read-back (DELETE/PATCH returns 204); confirm via a second account's view.
+- **Mass-assignment-adjacent** — body carries `owner_id`/`account_id`/`tenant_id` the server trusts (`hunt-api-misconfig`).
+- **Wildcard/alias** — `me`, `self`, `0`, `current` vs a numeric ID; array/HPP (`?id=mine&id=victim`); nested JSON (`{"data":{"id":"VICTIM"}}`).
+- **Encoded/hashed IDs** — base64/hex/MD5-of-sequential; decode or correlate from another response.
+- **Export/bulk/report endpoints** — per-object checks present, bulk endpoint missing them.
+
+### Tooling
+- **Burp Autorize / AuthMatrix / Auth Analyzer** — replay every request with User B's session and auto-flag 200s that should be 403 (the fastest systematic IDOR sweep).
+- **ffuf/Turbo Intruder** for ID enumeration with length/status differential; keep volume minimal and stop at proof.
+
+## Remediation
+
+- Enforce object-level authorization on every access (read AND write/delete) by scoping the query to the authenticated principal (`WHERE id=? AND owner=current_user`), not by obscurity of the identifier.
+- Centralize the ownership check (policy layer) so every route/verb/version and GraphQL resolver inherits it; never trust a client-supplied `owner/tenant/account` id.
+- Use unpredictable IDs as defense-in-depth only; add server-side authz tests (Autorize-style) to CI.
 
 ## Related Skills & Chains
 

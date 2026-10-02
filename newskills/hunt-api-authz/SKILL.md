@@ -6,6 +6,8 @@ author: uphiago
 license: MIT
 platforms: [linux]
 compatibility: Requires curl, jq, python3
+cwe: [CWE-285, CWE-639, CWE-863, CWE-862, CWE-566]
+cvss_baseline: "High (7.5-8.1) BOLA cross-tenant read / BFLA access to privileged function → Critical (9.1-9.8) cross-tenant write/admin takeover or mass extraction."
 metadata:
   tags: [api, authz, idor, bola, bfla, privilege-escalation]
   category: auth
@@ -348,6 +350,17 @@ Capture and package these exact technical artifacts for reporting:
 4. **Impact Summary**: Concise summary stating whether the vulnerability permits Unauthorized Read, Write, Delete, or Privilege Escalation.
 
 ---
+
+## New Techniques (2024-2026)
+
+- **Autorize-style systematic sweep** — replay every mapped request with User B's and Anon's tokens; auto-diff status/length to flag BOLA/BFLA at scale (Burp Autorize / AuthMatrix / Auth Analyzer).
+- **BFLA on hidden/admin functions** — call admin/privileged methods as a standard user by guessing the verb/route (`/admin/*`, `promoteUser`, `setRole`, `impersonate`), switching HTTP method, or hitting the mobile/legacy/GraphQL variant that skips the function-level check (`hunt-shadow-api`).
+- **GraphQL & gRPC authz** — field-level BOLA on nested resolvers / `node(id:)`, unscoped mutations; gRPC methods callable without metadata or with spoofed edge-identity headers (`hunt-graphql`, `hunt-grpc`).
+- **Mass-assignment → self-elevation** — set `role`/`is_admin`/`tenant_id`/`owner` on update/create (`hunt-api-misconfig`).
+- **Client-supplied scope trust** — `tenant_id`/`org_id` in the body/JWT claim trusted without server-side ownership check; swap to another tenant's value.
+- **Workflow-stage / multi-interface discrepancy** — an operation gated on the web but not the API, or allowed mid-workflow by skipping a step.
+
+Stop at minimal proof (a `totalCount`, one foreign record, one privileged action on a test resource); never bulk-extract or perform destructive admin actions.
 
 ## Architectural Remediation
 

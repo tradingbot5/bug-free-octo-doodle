@@ -3,6 +3,9 @@ name: hunt-k8s
 description: "Hunt Kubernetes & Docker — API anonymous access, kubelet 10250 exec (SPDY/WebSocket, NOT plain POST) and the simpler /run primitive, etcd 2379 unauth, dashboard skip-login, RBAC misconfig, secret/SA-token abuse, docker.sock host escape, runc/container-escape (Leaky Vessels CVE-2024-21626), API-server-mediated nodes/proxy RCE, EphemeralContainers node-shell, bound/projected SA-token audience+expiry abuse, admission-controller bypass, Helm/Tiller remnants. Use when target runs containerized infra, exposes K8s ports (6443/10250/10255/2379/8443), or cloud metadata reveals K8s service accounts."
 sources: hackerone_public, cve_database, kubernetes_security_research, portswigger_research
 report_count: 13
+cwe: [CWE-306, CWE-269, CWE-668, CWE-16, CWE-862]
+cvss_baseline: "High (7.5-8.6) exposed kubelet/etcd/dashboard read → Critical (9.8) anonymous apiserver, IngressNightmare RCE, SA-token→cluster-admin, or container escape to node."
+related_skills: [cloud-iam-deep, hunt-cloud-misconfig, hunt-cicd, hunt-ssrf, hunt-grpc]
 ---
 
 # HUNT-K8S — Kubernetes & Docker Security
@@ -276,6 +279,32 @@ curl -sk "$SRV/apis/admissionregistration.k8s.io/v1/validatingwebhookconfigurati
 - **Dashboard `200` on the HTML shell** is just the login page; only a `200` with real resource JSON under `/api/v1/<resource>/<ns>` proves token-less data access.
 
 ---
+
+## New Techniques / CVEs (2024-2026)
+
+### IngressNightmare (ingress-nginx, March 2025) — CVE-2025-1974 + 24513/24514/1097
+Unauthenticated config/annotation injection into the ingress-nginx admission controller → arbitrary NGINX directives → **RCE in the controller pod, which typically holds a cluster-wide SA** → full cluster compromise. If the target runs ingress-nginx (very common), fingerprint the version and check whether the admission webhook is reachable; this was one of 2025's highest-impact cluster bugs.
+
+### Exposed control-plane & node surfaces
+```bash
+curl -sk https://$T:10250/pods                         # kubelet read API (no authz if anonymous-auth=true)
+curl -sk https://$T:10250/run/<ns>/<pod>/<ctr> -d "cmd=id"   # kubelet exec → RCE in pod
+curl -sk https://$T:6443/api/v1/namespaces/default/secrets   # anonymous apiserver / system:anonymous bound
+curl -s  http://$T:2379/v2/keys/?recursive=true        # etcd open → all secrets in plaintext
+# Dashboard without auth, cAdvisor :4194, kube-proxy, Argo/Flux UIs
+```
+
+### Token → RBAC escalation (post-access)
+A pod SA token (`/var/run/secrets/kubernetes.io/serviceaccount/token`) + over-broad RBAC = escalation: `create pods` (mount node fs / privileged), `create pods/exec`, `escalate`/`bind` verbs, `get secrets`, `impersonate`, `create tokenrequest`. Map with `kubectl auth can-i --list`. Cloud: pod → IMDS/IRSA → cloud creds (`cloud-iam-deep`).
+
+### Container escape primitives
+`privileged:true`, `hostPID`/`hostPath:/`, mounted `docker.sock`, `CAP_SYS_ADMIN`, writable `/proc`; `release_agent`/cgroup escapes on unpatched nodes. Demonstrate node-fs reach minimally, don't pivot.
+
+## Remediation
+
+- Disable kubelet anonymous auth and apiserver anonymous access; never bind `system:anonymous`/`system:unauthenticated` to real roles; put etcd on mTLS, off the public net.
+- Patch ingress-nginx (IngressNightmare) and restrict the admission webhook; keep the dashboard authenticated/off.
+- Least-privilege RBAC (no wildcard verbs/`escalate`/`impersonate`), Pod Security Admission `restricted`, drop capabilities, no `privileged`/`hostPath`/`docker.sock`, set IMDSv2 hop-limit so pods can't reach node credentials.
 
 ## Validation Checklist
 

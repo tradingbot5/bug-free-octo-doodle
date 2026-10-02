@@ -6,6 +6,8 @@ author: uphiago
 license: MIT
 platforms: [linux]
 compatibility: Requires curl, jq, python3
+cwe: [CWE-840, CWE-639, CWE-799, CWE-345, CWE-362]
+cvss_baseline: "High (7.5-8.1) repeatable price/refund manipulation or payment-state bypass → Critical (9.1+) scalable direct financial loss (double-spend, forged settlement). Theoretical without a demonstrated money delta is Low."
 metadata:
   tags: [payment, fintech, checkout, e-commerce, business-logic]
   category: redteam
@@ -348,6 +350,18 @@ Package these technical artifacts for engineering remediation:
 5. **Redaction**: Redact real credit card numbers, personal addresses, and sensitive customer PII.
 
 ---
+
+## New Techniques (2024-2026)
+
+- **Payment-provider webhook forgery/replay** — the `charge.succeeded`/`payment_intent` webhook marks the order paid; if the signature (`Stripe-Signature`, PayPal IPN, Adyen HMAC) isn't verified or lacks replay protection, forge/replay it to settle an unpaid order. Highest-impact modern payment bug.
+- **Client-trusted amount/currency** — amount, currency, or `paid` set client-side and trusted server-side; redirect-flow tampering (change amount between "create" and "capture"); currency confusion (pay in a weak currency priced at parity).
+- **Idempotency / race double-spend** — reuse/omit idempotency key or fire concurrent capture/refund (single-packet) to apply twice (`hunt-race-condition`).
+- **Refund/credit abuse** — refund more than paid, refund to a different instrument, partial-refund rounding, store-credit + refund stacking.
+- **Wallet-token replay** — Apple Pay / Google Pay / tokenized card payloads replayed across sessions/merchants when not bound.
+- **3DS / SCA bypass** — force the no-3DS path, downgrade to frictionless, or complete capture before authentication.
+- **Coupon/gift-card/loyalty economics** — stack non-stackable codes, negative/zero-total orders that still fulfill or earn points, race redemptions.
+
+Always prove on your **own test funds/sandbox**; never move real third-party money — demonstrate the delta on your own ledger.
 
 ## Architectural Remediation
 

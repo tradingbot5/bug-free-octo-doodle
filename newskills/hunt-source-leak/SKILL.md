@@ -3,6 +3,9 @@ name: hunt-source-leak
 description: Hunt source code and build artifact leakage — JavaScript source maps (.js.map) reconstructing TypeScript/ES6 source, Swagger/OpenAPI JSON endpoint discovery, .env/.git exposure, webpack chunks with hardcoded secrets, robots.txt/security.txt recon, build-info files, asset-manifest.json API route discovery, .DS_Store file listing. Use at the START of every recon session — these findings often unlock the entire attack surface.
 sources: hackerone_public, offensive_research
 report_count: 7
+cwe: [CWE-540, CWE-200, CWE-215, CWE-1104, CWE-527]
+cvss_baseline: "Medium (5.3) non-sensitive source/config exposure → High (7.5-8.6) secrets/creds/keys recovered → Critical when leaked creds/keys grant backend or cloud access (chain to RCE/ATO)."
+related_skills: [hunt-spa-api, hunt-lfi, hunt-cicd, hunt-cloud-misconfig, supply-chain-attack-recon]
 ---
 
 # HUNT-SOURCE-LEAK — Source Code & Build Artifact Leakage
@@ -285,6 +288,37 @@ trufflehog filesystem /tmp/repo/
 ```
 
 ---
+
+## New Techniques / Tooling (2024-2026)
+
+### Exposed VCS & build artifacts
+```bash
+git-dumper https://$T/.git/ out/            # reconstruct repo from exposed /.git
+curl -s https://$T/.git/config              # remote URL often embeds creds
+# also: /.svn/ (svn-extractor), /.hg/, /.bzr/, CVS/
+```
+Then scan the recovered tree: **trufflehog**, **gitleaks**, and git *history* (secrets removed in HEAD still live in old commits).
+
+### Source maps → original source
+```bash
+curl -s https://$T/static/js/main.<hash>.js.map -o app.js.map
+sourcemapper -input app.js.map -output ./src   # or unwebpack-sourcemap
+```
+Reconstructed TS/JSX reveals endpoints, auth logic, feature flags, and hardcoded secrets (hand route-mapping to `hunt-spa-api`).
+
+### Config / backup / debug exposure
+`.env`, `.env.local`, `config.php~`, `settings.py.bak`, `web.config`, `*.swp`/`~`/`.orig`, `/.DS_Store` (ds_store_exp → directory tree), `/actuator/env`, `/debug`, `phpinfo.php`, `/server-status`, `wp-config.php.bak`, `docker-compose.yml`, `.npmrc`/`.pypirc` (registry tokens), CI files (`.github/workflows`, `.gitlab-ci.yml`).
+
+### Dependency confusion lead
+Internal package names in `package.json`/`requirements.txt`/imports that aren't on the public registry → claimable namespace → supply-chain (hand to `supply-chain-attack-recon`).
+
+### Historical secrets
+Wayback/`gau`/`waybackurls` + `gf` to pull old JS/paths that leaked keys later removed; validate any key's reachability before claiming impact (don't over-claim analytics/Maps keys).
+
+## Remediation
+
+- Block `/.git`, `/.svn`, `/.env`, backups, and `*.map` at the web server/CDN; don't deploy source maps to prod (or restrict to internal); keep secrets out of the repo and bundles.
+- Rotate any exposed secret immediately and scan git history; add pre-commit secret scanning (gitleaks) and CI artifact scanning; publish internal packages to a private registry with namespace reservation.
 
 ## Validation
 

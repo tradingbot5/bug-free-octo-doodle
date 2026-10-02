@@ -3,6 +3,9 @@ name: hunt-misc
 description: Hunting skill for misc vulnerabilities. Built from 225 public bug bounty reports. Use when hunting misc on any target.
 sources: github, hackerone_public
 report_count: 225
+cwe: [CWE-200, CWE-209, CWE-16, CWE-668]
+cvss_baseline: "Varies by class — most entries are Low-Medium standalone but become High/Critical when chained (info leak → ATO, debug endpoint → RCE). Score by realized impact, not the class label."
+related_skills: [triage-validation, hunt-source-leak, hunt-idor, hunt-api-misconfig, hunt-exceptional-conditions]
 ---
 
 ## Crown Jewel Targets
@@ -322,6 +325,18 @@ When you confirm a misc primitive at A, **immediately** ask: what state-machine,
 - `hunt-ato` — Chains 1, 2, 5, 6 (all terminal-impact paths)
 
 ---
+
+## Modern low-hanging classes (2024-2026)
+
+Quick wins that still pay, each a chain-starter rather than a standalone Critical:
+- **Secrets in client surfaces** — API keys/tokens in JS bundles, mobile apps, `__NEXT_DATA__`/RSC, error pages (validate reachability; hand to `hunt-source-leak`).
+- **Debug/observability exposure** — `/actuator`, `/_next/*`, `/debug`, `/metrics`, GraphQL introspection, Swagger/OpenAPI, source maps, `.env`/`.git` (chain to deeper access).
+- **Info disclosure in responses** — internal IDs, stack traces (`hunt-exceptional-conditions`), PII over-fetch, verbose JSON fields the UI hides, recovery/backup codes in `/api/me`.
+- **Missing security headers with a real sink** — only when they enable something (framing→clickjacking, nosniff→XSS); header-absence alone is Informational.
+- **Rate-limit/anti-automation gaps**, **email/SMS bombing** (abuse, usually Low), **registration/enumeration**, **open dev/staging/preview hosts** (weaker auth — confirm ownership via `recon-scope-triage`).
+- **Webhook/SSRF-lite** — user-set callback URLs, link preview/unfurl fetchers, avatar-from-URL (hand to `hunt-ssrf`).
+
+**Discipline:** this is a catch-all — always run `triage-validation`'s gate so a 200-but-no-impact or an Informational isn't filed as a vuln; most misc findings earn their severity only via a chain.
 
 ## Related Skills & Chains
 
