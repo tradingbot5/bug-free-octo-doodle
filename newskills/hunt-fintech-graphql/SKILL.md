@@ -3,6 +3,9 @@ name: hunt-fintech-graphql
 description: "Hunt fintech-specific GraphQL vulnerabilities: money-movement mutations (transfers, redemptions, withdrawals, card top-ups), ledger/balance/portfolio query IDOR, decimal-precision and rounding abuse, idempotency-key bypass enabling double-spend, KYC/PII field-level authorization gaps, and admin-override mutations reachable via mass assignment. Distinct from hunt-graphql, which owns generic GraphQL discovery and IDOR/mutation methodology — this skill owns the delta introduced when a GraphQL layer sits in front of a ledger, wallet, payments, banking, brokerage, or lending backend, where a resolver bug moves real money instead of just leaking data. Use when hunting a fintech, banking, payments, wallet, neobank, brokerage, or lending target that exposes a GraphQL API, or when a schema/response includes balance, transfer, ledger, redeem, quote, KYC, or account-linking fields."
 sources: owasp_api_top10_2023, public_research
 report_count: 0
+cwe: [CWE-840, CWE-639, CWE-799, CWE-362, CWE-20]
+cvss_baseline: "High (8.1) ledger/balance IDOR or KYC/PII field leak → Critical (9.1-9.8) money-movement mutation abuse, double-spend, or admin-override reachable as a normal user."
+related_skills: [hunt-graphql, hunt-business-logic, hunt-race-condition, hunt-idor, hunt-payment-security, hunt-api-misconfig]
 ---
 
 ## Why Fintech GraphQL Is a Different Risk Class
@@ -223,6 +226,45 @@ someone else's balance" is real impact; "I sent a malformed amount and got a 400
    `hunt-source-leak`-class finding, not a fintech-logic one — don't conflate the two in a report.
 
 ---
+
+## New Techniques (2024-2026)
+
+### GraphQL batching → idempotency bypass & double-spend
+Fintech idempotency usually keys on an HTTP header or a per-request UUID. A **single HTTP request carrying an array of operations** (or aliased duplicate mutations) often shares one idempotency context or races the ledger write:
+```json
+[ {"query":"mutation{withdraw(amount:100,to:\"ATTACKER\"){id}}"},
+  {"query":"mutation{withdraw(amount:100,to:\"ATTACKER\"){id}}"} ]
+```
+Or alias the same mutation N times in one document (single-packet, so they hit the balance check before the first debit commits):
+```graphql
+mutation { a:redeem(code:"X"){bal} b:redeem(code:"X"){bal} c:redeem(code:"X"){bal} }
+```
+This is the GraphQL-native form of the `hunt-race-condition` limit-overrun; batching makes it one request, defeating naive per-request throttles.
+
+### Decimal / precision / currency abuse in mutations
+- Sub-cent and float inputs: `amount: 0.000001`, `amount: 1e-2`, negative (`-100` → credit), `NaN`/`Infinity` where the scalar coerces.
+- Currency-field confusion: `{amount:100, currency:"IDR"}` priced as USD, or omit currency to hit a parity default.
+- Quantity×unit rounding: force banker's rounding to round in your favor across many line items.
+
+### Field-level authorization gaps (BOLA/BFLA at resolver granularity)
+Top-level query is authed, nested relations are not: request `me{ organization{ members{ ssn kycDocuments payoutMethods{ cardLast4 } } } }` — the nested resolver skips the ownership check the top one did. Enumerate `node(id:)`/global-ID relations to reach other tenants' ledgers. Cross-ref `hunt-graphql`, `hunt-idor`.
+
+### Admin-override & mass-assignment mutations
+Introspect (or brute from bundle strings) for `adminAdjustBalance`, `setKycStatus`, `overrideLimit`, `impersonate`, `grantRole` — then try as a normal user. Pass extra input fields the schema didn't lock (`{amount:1, status:"SETTLED", fee:0, approvedBy:"system"}`) — mass assignment into privileged fields.
+
+### Quote/TOCTOU & webhook trust
+Lock a favorable FX/stock quote, then execute after the market moves (quote not re-validated at execution); replay or forge an unsigned payment-provider webhook to mark a transfer `SETTLED`. Cross-ref `hunt-business-logic`, `hunt-payment-security`.
+
+### Methodology additions
+- Always test money-movement mutations in a **test/sandbox account with your own funds**; prove the delta on your own ledger, never move real third-party money.
+- Diff authz across interfaces: the same mutation via web vs mobile vs partner API often has different field-level checks.
+
+## Remediation
+
+- Enforce authorization at every resolver (object + field level), not just the entry query; re-check ownership on nested relations and `node(id:)`.
+- Server-side idempotency that is atomic across batched/aliased operations; cap batch size and alias count; rate-limit money mutations per account across concurrency.
+- Represent money as integer minor-units with an explicit, server-validated currency; reject negative/NaN/precision-abusing inputs; re-validate quotes at execution time.
+- Verify provider webhook signatures + replay windows; restrict admin/override mutations by role and audit them.
 
 ## Related Skills & Chains
 

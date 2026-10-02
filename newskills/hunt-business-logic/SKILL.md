@@ -3,6 +3,9 @@ name: hunt-business-logic
 description: Hunting skill for business logic vulnerabilities. Built from 12 public bug bounty reports. Covers coupon-race-stacking (Instacart, Stripe, Reverb), negative-quantity-in-cart price tampering (Upserve, Eternal/Zomato), decimal/fraction price-field overflow (Shipt), client-side checkout amount trust on PayPal redirect (WordPress.org), price-per-unit mass-assignment (Krisp), and archived-price swap / cart-TOCTOU (Stripe). Use when hunting business logic — heavy emphasis on financial-impact-demonstrated cases.
 sources: hackerone_public, github
 report_count: 25
+cwe: [CWE-840, CWE-841, CWE-639, CWE-799, CWE-20]
+cvss_baseline: "Severity tracks realized financial/trust impact: Medium (5-6) limited abuse → High (7-8) repeatable money/loyalty extraction or workflow bypass → Critical (9+) scalable direct financial loss. Theoretical 'could' without a demonstrated delta is Low."
+related_skills: [hunt-race-condition, hunt-idor, hunt-payment-security, hunt-fintech-graphql, hunt-api-misconfig]
 ---
 
 ## Crown Jewel Targets
@@ -226,6 +229,22 @@ The following real, verified bug-bounty / coordinated-disclosure cases extend th
     - Year: 2021 — Stripe Medium (per-subscription recurring loss)
 
 ---
+
+## New Techniques (2024-2026)
+
+- **Idempotency-key bypass → double-spend** — omit, reuse, or vary the idempotency key (case, whitespace, new UUID) on a payment/refund/transfer so the same operation applies twice; combine with concurrency (cross-ref `hunt-race-condition`, `hunt-fintech-graphql`).
+- **Currency / rounding / decimal abuse** — mix currencies the backend treats at parity, exploit banker's-rounding on per-unit × quantity, sub-cent amounts, or `0.1+0.2` float drift to pay less / refund more.
+- **Workflow state-machine skipping** — jump straight to the post-payment/post-verification endpoint, reorder multi-step flows (KYC, checkout, approval), replay a "completed" webhook, or cancel-after-fulfill.
+- **Coupon / referral / loyalty economics** — stack non-stackable codes, race parallel redemptions, self-referral loops, negative/zero-amount orders that still earn points, convert points→cash at a stale rate.
+- **Quantity & limit tampering** — negative or fractional quantity, integer overflow on totals, exceed per-user caps via parallel requests or multiple carts.
+- **Subscription/trial abuse** — proration gaming, downgrade-after-benefit, infinite trials via email/tenant permutations, entitlement that outlives payment.
+- **Webhook trust** — forge/replay provider webhooks (missing signature or replay protection) to mark orders paid; cross-ref `hunt-payment-security`.
+
+## Remediation
+
+- Enforce server-side idempotency (atomic key consume-before-process), and derive all amounts/entitlements server-side — never trust client-supplied price, currency, quantity, or status.
+- Model flows as explicit state machines with server-enforced transitions; verify each prerequisite step server-side; make operations atomic/transactional against concurrency.
+- Verify webhook signatures + replay windows; cap and rate-limit redemptions per account/identity across parallel requests; use integer minor-units for money.
 
 ## Related Skills & Chains
 

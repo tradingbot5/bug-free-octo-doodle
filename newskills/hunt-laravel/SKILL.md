@@ -3,6 +3,9 @@ name: hunt-laravel
 description: Hunt Laravel specific vulnerabilities — Debug mode leakage (APP_DEBUG=true exposes full stack trace + env vars), Laravel Telescope/Horizon dashboard unauthorized access, Ignition RCE (CVE-2021-3129), Signed URL manipulation, Queue Worker abuse, mass assignment via Eloquent, deserialization via cookies, .env file exposure. Use when target runs Laravel (PHP) — detected via X-Powered-By, Laravel session cookies, or /storage/ paths.
 sources: hackerone_public, cve_database
 report_count: 14
+cwe: [CWE-502, CWE-209, CWE-915, CWE-917, CWE-312]
+cvss_baseline: "Medium (5.3) debug/env disclosure → High (8.1) signed-URL/mass-assignment abuse → Critical (9.8) Ignition RCE or APP_KEY-leak → cookie decrypt+unserialize RCE."
+related_skills: [hunt-exceptional-conditions, hunt-deserialization, hunt-rce, hunt-api-misconfig, hunt-source-leak]
 ---
 
 # HUNT-LARAVEL — Laravel Specific Vulnerabilities
@@ -196,6 +199,26 @@ php phpggc Laravel/RCE5 system 'id' | base64
 | Mass assignment | Set is_admin=true → privilege escalation | Critical |
 
 ---
+
+## New Techniques (2024-2026)
+
+### APP_KEY leak → cookie decrypt → `unserialize` RCE
+The highest-impact modern Laravel chain. A leaked `APP_KEY` (from `.env` exposure, debug page, source leak, git) lets you both forge/decrypt any encrypted cookie AND, because Laravel's `X-XSRF-TOKEN`/session cookies are encrypted-then-serialized, craft a payload that deserializes a PHPGGC Laravel gadget chain on decrypt → RCE. Tooling: **laravel-crypto-killer** / PHPGGC `Laravel/RCE*`. Mass `APP_KEY` reuse across deployments (framework default/examples) makes this widespread. Cross-ref `hunt-deserialization`, `hunt-source-leak`.
+
+### CVE-2024-52301 — environment override via query arg
+`?--env=...` (when `register_argv_values`/argv handling is on) can switch the app environment → re-enable debug/alternate config. Confirm via debug/Whoops or an env banner. Fixed 11.31.0 / 10.48.23 / 9.52.17.
+
+### Debug/Telescope/Horizon exposure
+`APP_DEBUG=true` Ignition page (CVE-2021-3129 RCE when writable logs), `/telescope` (request/response, DB, tokens), `/horizon` (queue payloads with auth tokens) left world-readable. Also `/_ignition/execute-solution` reachable.
+
+### Signed-URL & mass-assignment
+Tampering non-signature params where the signature only covers a subset; `$guarded=[]`/loose `$fillable` → set `is_admin`/`role` on update/register (cross-ref `hunt-api-misconfig`).
+
+## Remediation
+
+- Keep `APP_DEBUG=false` in production; never expose `.env`; rotate `APP_KEY` if ever leaked and treat a leaked key as full compromise.
+- Gate `/telescope`, `/horizon`, `/_ignition` behind auth or disable in prod; patch laravel/framework and facade/ignition for the CVEs above.
+- Explicit `$fillable` allowlists; validate signed-URL integrity over all security-relevant params; store secrets outside the web root.
 
 ## Validation
 

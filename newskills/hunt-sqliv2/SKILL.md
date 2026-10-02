@@ -6,6 +6,8 @@ author: uphiago
 license: MIT
 platforms: [linux]
 compatibility: Requires curl, jq
+cwe: [CWE-89, CWE-564, CWE-943]
+cvss_baseline: "High (8.0) blind/time-based extraction → Critical (9.8) unauth injection with data read/RCE (stacked queries, xp_cmdshell, COPY TO PROGRAM). ORDER BY/LIMIT-only injection is often Medium until data impact is shown."
 metadata:
   tags: [sqli, audit, database, orm, reporting]
   category: redteam
@@ -181,6 +183,31 @@ Identify backend technology through observable language-specific behavior:
 - **Destructive Payloads**: Never send `DROP`, `UPDATE`, `DELETE`, or `INSERT` statements against production assets.
 
 ---
+
+## New Techniques (2024-2026)
+
+### ORM operator / query-shape injection (the modern surface)
+Raw `'OR 1=1` is mostly dead; the live bugs are in ORM glue:
+- **Sequelize / Prisma / TypeORM** — attacker-controlled filter objects reach operator keys: `?where[id][gt]=0`, `{"id":{"in":[...]}}`, Prisma `OR`/`contains` passthrough. Cross-ref `hunt-nosqli` for the object-injection mechanics.
+- **Django** — `.extra()`, `.raw()`, `QuerySet.annotate(RawSQL(...))`, and `__` lookups built from user keys; `order_by(request.GET[...])` is injectable (column + direction).
+- **Hibernate / JPA** — HQL/JPQL string concatenation, `@Query` with `?1` vs string build; `ORDER BY`/`GROUP BY` can't be parameterized → allowlist.
+- **JSON-path injection** — MySQL `->>`/`JSON_EXTRACT`, Postgres `#>>` built from user input.
+
+### Non-parameterizable contexts
+`ORDER BY`, `LIMIT`/`OFFSET`, column/table identifiers, and `IN (...)` lists are frequently string-built because bind params can't cover them — the richest modern SQLi. Probe `?sort=id/**/desc`, `?sort=(select ...)`.
+
+### Second-order & stored
+Input stored benign (profile field, filename), later concatenated into a query by a different job/report/export. Tag payloads with a unique marker and watch admin/report/analytics paths.
+
+### WAF-bypass & blind confirmation
+Inline comments (`/**/`, `/*!50000*/`), scientific notation, `CASE WHEN`, `||`/`+` concat, Unicode, and time-based via heavy subqueries (`RLIKE`/`pg_sleep`/`WAITFOR`). Prefer OOB (DNS via `LOAD_FILE`/`xp_dirtree`/`UTL_HTTP`) for blind proof over timing where egress allows.
+
+## Remediation
+
+- Parameterize every value; for identifiers/`ORDER BY`/`LIMIT` use a strict server-side allowlist, never string interpolation.
+- In ORMs, never pass raw `req.query`/`req.body` objects as filters; validate keys/operators against an allowlist; avoid `.raw()`/`RawSQL`/string `@Query`.
+- Least-privilege DB account (no `FILE`, no stacked-query/DDL, no `xp_cmdshell`/`COPY ... PROGRAM`); disable multi-statement where unused.
+- Centralize query building; add CI checks for string-concatenated SQL.
 
 ## Verification
 

@@ -3,6 +3,9 @@ name: hunt-host-header
 description: "Hunt Host Header Injection — password reset poisoning → ATO, web cache poisoning via unkeyed Host/X-Forwarded-Host, routing-based SSRF (Host picks upstream → cloud metadata/internal services), path-override SSRF/ACL-bypass (X-Original-URL/X-Rewrite-URL), OAuth redirect_uri/issuer poisoning, and absolute-URL link poisoning in emails. High to Critical when it reaches ATO or mass cache poisoning. Built on public Host-header research (PortSwigger 'Practical web cache poisoning' + James Kettle, and the classic password-reset-poisoning class). Use on any forgot-password flow, CDN/reverse-proxy-fronted app, OAuth/OIDC endpoint, or absolute-URL-in-email feature."
 sources: portswigger_research, hackerone_public
 report_count: 16
+cwe: [CWE-644, CWE-20, CWE-918, CWE-640, CWE-349]
+cvss_baseline: "High-Critical (8.1-9.8) reset-poisoning ATO or routing-SSRF to usable cloud creds → High (7.4) shared-cache poisoning or path-override ACL bypass → Low if reflected-only, uncacheable, and not in the email."
+related_skills: [hunt-forgot-password, hunt-cache-poison, hunt-ssrf, hunt-oauth, hunt-ato, hunt-http-smuggling]
 ---
 
 # HUNT-HOST-HEADER — Host Header Injection
@@ -263,3 +266,13 @@ not merely reflected.
 - Cache poisoning → mass XSS/redirect (shared key proven): High
 - Path-override → internal/admin reach: High
 - Reflected only, uncacheable, not in email, no internal reach: Low / informational
+
+---
+
+## Remediation
+
+- Build all absolute URLs (reset links, email links, OAuth `redirect_uri`, OIDC `issuer`) from a server-side configured canonical domain — never from the request `Host`/`X-Forwarded-Host`.
+- Validate `Host` against an allowlist at the edge (`ALLOWED_HOSTS`/server_name) and reject unknown hosts with a 400; strip/ignore `X-Forwarded-Host`, `X-Host`, `X-Original-URL`, `X-Rewrite-URL` unless a trusted proxy sets them.
+- Include `Host`/relevant forwarded headers in the cache key (or `Vary`) so attacker-supplied values can't poison shared entries; don't reflect host-derived values into cacheable bodies.
+- Don't let the `Host` header select the upstream; pin backends explicitly. Block the metadata IP/hostnames at the proxy egress.
+- For OAuth/OIDC, exact-match registered `redirect_uri` and pin the issuer server-side.

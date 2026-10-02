@@ -1,8 +1,11 @@
 ---
 name: hunt-lfi
 description: "Hunt Local File Inclusion (LFI), Remote File Inclusion (RFI), and Path Traversal — /etc/passwd read, log poisoning → RCE, PHP filter-chain RCE (no upload needed), php:// / data:// / zip:// / phar:// wrappers, RFI via allow_url_include, directory traversal read/write/delete. Covers OOB/blind LFI confirmation and false-positive discipline. Use when hunting file-include or path-traversal bugs on any target."
-sources: hackerone_public, synacktiv_research, portswigger_research
+sources: hackerone_public, synacktiv_research, portswigger_research, cve_database
 report_count: 24
+cwe: [CWE-98, CWE-22, CWE-73, CWE-434, CWE-611]
+cvss_baseline: "Medium (5.3) non-sensitive read → High (7.5-8.6) read of secrets (.env, keys, cloud creds) → Critical (9.8) RCE via filter-chain / RFI / log / phar / CVE."
+related_skills: [hunt-rce, hunt-file-upload, hunt-source-leak, hunt-ssrf, hunt-aspnet, triage-validation]
 ---
 
 # HUNT-LFI — Local / Remote File Inclusion & Path Traversal
@@ -196,6 +199,22 @@ Verified, correctly-attributed references for the patterns above:
 > Grounding note: this skill is built from 31 disclosed LFI/path-traversal reports. When citing a specific HackerOne report in your write-up, link the exact report URL/ID you used — do **not** paraphrase a report ID from memory. A wrong ID is worse than none.
 
 ---
+
+## New Techniques / CVEs (2024-2026)
+
+- **Nginx `alias` off-by-slash traversal** — a `location /assets { alias /app/static/; }` without a trailing slash on the location lets `/assets../` escape the directory (`GET /assets../etc/passwd`). Classic but still widespread; test any CDN/static mount.
+- **Spring Framework path traversal CVE-2024-38819** — functional web-framework static-resource handler traversal → arbitrary file read on affected versions. Fingerprint Spring, test `..%2f` on static resource routes.
+- **PHP-CGI CVE-2024-4577** (already noted) — Windows Best-Fit arg injection; pairs with any PHP-CGI/XAMPP file-serve.
+- **Node/Express `sendFile`/`express.static` + decode gaps** — `%2e%2e%2f`, encoded null, and `..%00` on frameworks that normalize inconsistently; also `require()`-traversal in dynamic module loaders.
+- **Grafana CVE-2021-43798 / plugin path traversal class** — `/public/plugins/<id>/..%2f..%2f` style reads; check any dashboards/observability mounts.
+- **Archive & image sinks** (Zip Slip, ImageMagick `label:@/etc/passwd`) — covered in Phase 8b; the modern reminder is these need *no* `?file=` param, so don't skip targets that lack an obvious include parameter.
+
+## Remediation
+
+- Resolve the user path against a fixed base with `realpath()`/canonicalization and verify the result stays within an allowlisted directory; reject `..`, null bytes, wrappers, and absolute/UNC paths at the boundary.
+- Map user input to an allowlist of known files/IDs rather than passing it to `include`/`require`/`file_get_contents`/`sendFile`.
+- Disable dangerous PHP wrappers and `allow_url_include`/`allow_url_fopen`; set `open_basedir`; keep Apache/Nginx/Spring/PHP patched for the CVEs above.
+- Isolate renderers and run least-privilege so a read can't reach secrets/cloud metadata; store secrets outside the web root.
 
 ## Sensitive Files to Read
 ```

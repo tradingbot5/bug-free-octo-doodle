@@ -1,8 +1,11 @@
 ---
 name: hunt-grpc
 description: "Hunt gRPC vulnerabilities — server reflection enabled (enumerate all services/methods), missing authentication / metadata-stripping on internal endpoints, plaintext gRPC over HTTP/2, internal endpoint disclosure, proto file leakage, gRPC-Web/grpc-gateway transcoding injection, and HTTP/2 Rapid Reset DoS (CVE-2023-44487). Use when target exposes port 50051 / 443 / 8443 / 9090 with HTTP/2, when grpcurl/grpcui detects reflection, when an Envoy or grpc-gateway proxy is fronting a microservice, or when recon reveals a microservice architecture."
-sources: hackerone_public, grpc_security_research, cert_cc_advisory
+sources: hackerone_public, grpc_security_research, cert_cc_advisory, cve_database
 report_count: 6
+cwe: [CWE-306, CWE-862, CWE-400, CWE-290, CWE-668]
+cvss_baseline: "Medium (5.3) reflection/proto disclosure → High (7.5-8.1) unauth sensitive method call / metadata-trust impersonation → Critical (9.1) admin method exec or Rapid-Reset/CONTINUATION DoS-grade availability impact (per program scope)."
+related_skills: [hunt-api-misconfig, hunt-jwt-crypto, hunt-idor, hunt-shadow-api, hunt-k8s]
 ---
 
 # HUNT-GRPC — gRPC Security
@@ -246,6 +249,38 @@ buf       # lint/inspect proto, drive Connect endpoints
 Related skills: **hunt-idor** (id enumeration logic), **hunt-api-misconfig** (JWT alg=none / mass-assignment in request messages), **hunt-auth-bypass** (edge-vs-backend trust boundary), **hunt-tls-network** (h2c/plaintext + ALPN), **cloud-iam-deep** (if a called RPC returns cloud creds).
 
 ---
+
+## New Techniques (2024-2026)
+
+### HTTP/2 Rapid Reset (CVE-2023-44487) & CONTINUATION flood (CVE-2024-27316 class)
+gRPC rides HTTP/2, so both DoS primitives apply at the transport: Rapid Reset (open stream + immediate RST_STREAM in a loop) and CONTINUATION-frame floods (endless header continuations) can exhaust the server. **Only probe DoS with explicit authorization and minimal volume** — demonstrate the primitive (a single abusive stream pattern) rather than sustaining an outage; many programs treat DoS as out-of-scope.
+
+### Metadata-trust impersonation (edge-authenticated backends)
+Very common in service meshes: Envoy/gateway authenticates and injects identity as metadata, the backend trusts it. If the edge doesn't *strip* client-supplied copies, spoof them directly:
+```bash
+grpcurl -plaintext -H 'x-user-id: 1' -H 'x-authenticated: true' \
+  -H 'x-forwarded-client-cert: By=spiffe://cluster/ns/default/sa/admin' \
+  $T:50051 admin.AdminService/ListUsers
+# also try -bin keys: some auth middleware only inspects text metadata
+grpcurl -plaintext -H 'authorization-bin: <base64>' $T:50051 payment.PaymentService/Transfer
+```
+
+### Reflection + grpc-gateway transcoding = unauth REST
+When server reflection is on, enumerate every method, then hit the grpc-gateway/Connect REST mapping over plain HTTP/JSON (no gRPC client, often less-guarded):
+```bash
+grpcurl -plaintext $T:50051 list                       # enumerate
+curl -s -X POST https://$T/v1/users/1 -H 'Content-Type: application/json' -d '{}'   # transcoded
+```
+Connect protocol (`Content-Type: application/json` to the gRPC path) needs no framing.
+
+### IDOR / BOLA across method id fields
+Enumerable `id`/`account_id` args on reflected methods with no object-level check → cross-tenant read/write (cross-ref `hunt-idor`).
+
+## Remediation
+
+- Disable server reflection in production; require auth on every method (don't rely on "internal only"); validate object-level authorization per request.
+- At the mesh edge, **strip** all client-supplied identity metadata (including `-bin` and `x-forwarded-client-cert`) before forwarding; use mTLS/SPIFFE, not trust-by-header.
+- Patch HTTP/2 stacks for Rapid Reset / CONTINUATION; set stream and header-list limits; don't serve plaintext gRPC on untrusted networks.
 
 ## Validation — false-positive discipline
 

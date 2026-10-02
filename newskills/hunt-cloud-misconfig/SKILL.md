@@ -3,6 +3,9 @@ name: hunt-cloud-misconfig
 description: "Hunt cloud / infrastructure misconfigurations. AWS: public S3 buckets (s3:GetObject anonymous), permissive bucket policies (PutObjectAcl public-write), exposed CloudFront origin, public Lambda function URL, public RDS snapshot, IAM credentials in JS bundles, AWS metadata accessible via SSRF. GCP: public GCS buckets, exposed Cloud Run services, leaked service account JSON. Azure: public blob containers, exposed Function App. (Kubernetes/Docker exposure is owned by hunt-k8s; CI/CD pipeline attacks by hunt-cicd; post-credential IAM escalation by cloud-iam-deep.) Detection: targeted dorking, certificate transparency, JS bundle secret extraction, port scan for known service ports. Validate: actual data read / write / RCE. Use when hunting cloud-native storage and compute misconfig (S3/GCS/Blob, IMDS-via-SSRF, serverless, public managed services)."
 sources: hackerone_public, public_research
 report_count: 6
+cwe: [CWE-16, CWE-284, CWE-732, CWE-668]
+cvss_baseline: "Medium (5.3) public read of non-sensitive data → High (7.5-8.6) secret/PII read or public write → Critical (9.8) credential leak usable for account/infra takeover (chain to cloud-iam-deep)."
+related_skills: [cloud-iam-deep, hunt-ssrf, hunt-k8s, hunt-cicd, hunt-source-leak, hunt-spa-api]
 ---
 
 ## 16. CLOUD / INFRA MISCONFIGS
@@ -183,6 +186,25 @@ No CVE assigned specifically to AWS RUM as of 2026-05. The attack class is docum
 7. **Do not** modify/delete data even if permitted — read-only PoC only.
 
 ---
+
+## New Surfaces (2024-2026)
+
+Beyond classic public buckets:
+- **Public container registries** — ECR Public, GCR/Artifact Registry, GHCR, Docker Hub orgs leaking private images (pull, then scan layers for secrets with trufflehog). Cross-ref `hunt-cicd`.
+- **Terraform / Pulumi state** — `terraform.tfstate` in public buckets/repos contains plaintext secrets and full infra map (also covered by `hunt-cicd`).
+- **Azure SAS tokens & public blob containers** — over-permissioned/long-lived SAS in JS/mobile; `?comp=list` container enumeration.
+- **GCP IAM `allUsers`/`allAuthenticatedUsers`** on buckets, Cloud Run (unauth invoker), Cloud Functions, and Pub/Sub; service-account JSON in bundles.
+- **Public EBS/RDS snapshots & AMIs** — cross-account-shared or public snapshots mountable for data recovery.
+- **Serverless over-exposure** — public Lambda Function URLs, API Gateway without authorizer, `appsync` public APIs.
+- **IMDS via SSRF** — prefer IMDSv2 chains; where IMDSv1 is still reachable through SSRF it's a direct creds path (hand off to `cloud-iam-deep` for escalation).
+Validate with an actual read/write/exec; stop at minimal proof (a `totalCount`, one object, or `sts get-caller-identity`), never bulk-exfiltrate.
+
+## Remediation
+
+- Block public access at the account/org level (S3 Block Public Access, GCP org policy `iam.allowedPolicyMemberDomains`, Azure "disallow public blob"); default-deny bucket/object ACLs and resource policies.
+- Enforce IMDSv2 (hop-limit 1, token required); keep credentials out of client bundles/mobile; scope and short-TTL any SAS/presigned URL.
+- Private-only registries and snapshots; scan images/artifacts/state for secrets in CI; rotate anything exposed.
+- Require authN/authZ on serverless entry points (Function URLs, API Gateway authorizers, Cloud Run invoker IAM).
 
 ## Related Skills & Chains
 

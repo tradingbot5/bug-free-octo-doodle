@@ -3,6 +3,9 @@ name: hunt-cicd
 description: "Hunt CI/CD pipeline vulnerabilities — GitHub Actions workflow injection (pull_request_target Pwnrequest + ${{ }}-into-shell), self-hosted runner poisoning, OIDC trust-policy abuse, Jenkins script-console RCE and CVE-2024-23897 file read, GitLab CI runner-token registration, Terraform state file leakage, artifact/log secret leakage, pipeline env-var disclosure. Use when target has a public GitHub/GitLab org, exposed CI dashboards (Jenkins/TeamCity/Drone/Argo), or build artifacts/images are reachable."
 sources: hackerone_public, github_security_lab, cve_database, portswigger_research
 report_count: 18
+cwe: [CWE-94, CWE-77, CWE-269, CWE-522, CWE-349]
+cvss_baseline: "High (8.1) secret exfil from logs/artifacts or runner compromise → Critical (9.8) pipeline RCE / OIDC-to-cloud-admin / supply-chain injection into releases."
+related_skills: [hunt-cloud-misconfig, cloud-iam-deep, hunt-source-leak, supply-chain-attack-recon, hunt-rce]
 ---
 
 # HUNT-CICD — CI/CD Pipeline Security
@@ -246,6 +249,34 @@ trufflehog docker --image ORG/IMAGE:latest --only-verified
 | Image/log/artifact secret | Direct credential use | High |
 
 ---
+
+## New Techniques (2024-2026)
+
+### Compromised-Action supply chain (the 2025 wave)
+Third-party Actions run with your workflow's token/secrets. Two live patterns:
+- **`tj-actions/changed-files` compromise (CVE-2025-30066)** — a popular Action was backdoored to dump CI secrets into build logs across thousands of repos. Audit every `uses:` pinned to a **tag/branch** (mutable) rather than a **full commit SHA**; a tag can be re-pointed to malicious code.
+- **`reviewdog` Action compromise** — same class, cascaded into tj-actions. Treat any unpinned third-party Action as RCE-in-your-pipeline.
+Hunt: grep workflows for `uses: .*@v\d` / `@main` (unpinned); flag Actions with write perms + access to secrets.
+
+### Artifact & cache poisoning → cross-workflow RCE
+- **`actions/download-artifact` cross-run poisoning** — a low-priv workflow uploads an artifact a privileged workflow later downloads and executes/trusts.
+- **Actions cache poisoning** — a PR from a fork writes a cache key a trusted branch build restores (toolchain/binary swap).
+- **`actions/checkout` persisted credentials** — default leaves the token in `.git/config`; a later malicious step (or poisoned dependency) reads it.
+
+### GitHub Actions `pull_request_target` + `${{ }}`-into-shell (expanded)
+Untrusted PR fields (`title`, `body`, branch name, label) interpolated directly into `run:` → command injection with repo secrets. The fix is reading via `env:` and an action, not inline `${{ github.event.* }}`. Also script-injectable: `github.head_ref`, `pull_request.head.ref`.
+
+### OIDC trust-policy over-permission → cloud takeover
+Cloud role trust with `StringLike` on `sub` (`repo:ORG/*`) or only `aud` (no `sub`) lets any repo/branch/fork mint the role → assume into prod. Cross-ref `cloud-iam-deep`.
+
+### Self-hosted runner abuse
+Non-ephemeral self-hosted runners on public repos run fork-PR jobs → persistent host compromise + lateral movement; label-targeting (`runs-on: self-hosted`) reaches internal network.
+
+## Remediation
+
+- Pin every Action to a full commit SHA; restrict `GITHUB_TOKEN` to least privilege (`permissions:` block); require review for workflow changes; use `pull_request` not `pull_request_target` for untrusted code, and never interpolate event text into `run:` (pass via `env:`).
+- Ephemeral, isolated self-hosted runners (one job per VM); don't run fork PRs on self-hosted; scope OIDC trust to exact `repo:ORG/REPO:ref:...` `sub` claims.
+- Mask-and-minimize secrets; scan logs/artifacts/images for leaks in CI; separate build from deploy credentials; sign and verify release artifacts (SLSA/provenance).
 
 ## Validation Discipline (per finding, before you report)
 

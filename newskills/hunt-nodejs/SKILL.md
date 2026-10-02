@@ -1,8 +1,11 @@
 ---
 name: hunt-nodejs
 description: Hunt Node.js specific vulnerabilities — Prototype Pollution → RCE chains (lodash/merge/assign), Express trust proxy misconfiguration, child_process/eval injection, template engine SSTI (EJS/Pug/Handlebars), path traversal in file servers, require() injection, environment variable exfil via /proc/self/environ. Use when target runs Node.js/Express/Fastify/NestJS/Koa.
-sources: hackerone_public, snyk_research, portswigger_research
+sources: hackerone_public, snyk_research, portswigger_research, cve_database
 report_count: 24
+cwe: [CWE-1321, CWE-94, CWE-78, CWE-471, CWE-915]
+cvss_baseline: "Medium (6.1) prototype pollution with no reached sink / trust-proxy bypass → High-Critical (8.1-9.8) pollution→RCE gadget, SSTI RCE, child_process injection, or vm/vm2 sandbox escape."
+related_skills: [hunt-prototype-pollution, hunt-ssti, hunt-rce, hunt-api-misconfig, hunt-lfi]
 ---
 
 # HUNT-NODEJS — Node.js Specific Vulnerabilities
@@ -204,6 +207,31 @@ curl -s "https://$TARGET/api/file?path=/proc/self/cwd"       # working directory
 | /proc/self/environ via LFI | AWS_ACCESS_KEY_ID leaked | Cloud compromise |
 
 ---
+
+## New Techniques (2024-2026)
+
+### vm / vm2 / isolated-vm sandbox escapes
+Apps that run user code/expressions in `vm` or `vm2` are RCE-prone: **vm2 CVE-2023-37466 / CVE-2023-37903** are full escapes (vm2 is now unmaintained/deprecated — its presence is a finding). Node's built-in `vm` is explicitly *not* a security boundary. Look for "run snippet", formula/rules engines, templating with eval, serverless function emulators.
+```js
+// vm2 escape family reaches host require():
+const {VM}=require('vm2'); // attacker input → Promise/prepareStackTrace host-object escape → child_process
+```
+
+### Prototype-pollution → RCE gadget chains
+Pollution alone is Medium; find the sink. Known gadgets: `child_process` `spawn`/`execSync` via polluted `options.shell`/`env`/`NODE_OPTIONS` (`--require`), EJS `opts.outputFunctionName`/`escapeFunction`, polluted `Function.prototype`/template config. Cross-ref `hunt-prototype-pollution`. Confirm sink reach OOB (interactsh), not just key reflection.
+
+### SSRF via undici/fetch & `node:` tricks
+Node 18+ global `fetch`/undici follows redirects — SSRF to IMDS if URL is user-controlled; test `0.0.0.0`, `[::]`, decimal IP, redirect-to-metadata. `--inspect`/`--inspect-brk` exposed (CDP on 9229) = RCE; probe for open inspector.
+
+### Dependency/supply-chain & CVE sweep
+Leaked `package.json`/lockfiles → map to known-vuln versions (`osv`/`npm audit`). Postinstall-script and typosquat risk on build infra (cross-ref `hunt-cicd`). Express 5 changed query parsing / path-to-regexp ReDoS (CVE-2024-45296) — test regex route params for ReDoS.
+
+## Remediation
+
+- Never run untrusted code in `vm`; remove `vm2` (unmaintained) — use `isolated-vm` or a real OS/WASM sandbox with resource limits.
+- Null-proto objects (`Object.create(null)`)/`Map` for user-keyed data; freeze `Object.prototype`; validate/allowlist merge keys (reject `__proto__`,`constructor`,`prototype`); patched lodash.
+- Avoid `child_process` with shell; pass arg arrays; sanitize/allowlist; disable `trust proxy` unless behind a trusted LB and then pin hop count.
+- Validate outbound fetch targets (allowlist, block internal/metadata); never expose `--inspect` in prod; keep deps patched in CI.
 
 ## Validation
 

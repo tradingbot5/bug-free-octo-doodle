@@ -3,6 +3,9 @@ name: hunt-ntlm-info
 description: "Hunt NTLM/Negotiate information disclosure on internet-reachable IIS/SharePoint/Exchange. Anonymous NTLM Type-2 challenge capture leaks NetBIOS domain, internal DNS forest, computer name, AD timestamp via AV_PAIRS structure. Default Windows-installer hostnames (WIN-XXXXXXXXXXX pattern) signal lazy provisioning. Use when target advertises `WWW-Authenticate: NTLM` or `Negotiate` headers anonymously."
 sources: github, authorized-engagement
 report_count: 1
+cwe: [CWE-200, CWE-209, CWE-497]
+cvss_baseline: "Low-Medium (3.7-5.3) standalone internal-name/domain disclosure → feeds higher-impact AD/relay attacks internally. On a web bug-bounty program, often Informational-to-Low unless it exposes sensitive internal topology."
+related_skills: [hunt-source-leak, hunt-aspnet, hunt-sharepoint, recon-scope-triage, m365-entra-attack]
 ---
 
 ## Crown Jewel Targets
@@ -260,6 +263,27 @@ Target: `https://mail.example.com/EWS/Exchange.asmx`. Type-1 probe returns Type-
 Target: `https://intranet.corp.example` (clearly internal, behind VPN). Type-1 returns full AV-pair set. Not reportable — this is intended NTLM behavior on intranet, and the disclosure is to authenticated VPN users who already see the same data via `nltest /dsgetdc:corp.example.com`. Recognize and drop.
 
 ---
+
+## New Techniques / Context (2024-2026)
+
+### Decode the Type-2 challenge properly (AV_PAIRS)
+The leak lives in the base64 `NTLMSSP` Type-2 (CHALLENGE) message's target-info block. Capture it over a *persistent* connection, then decode every AV_PAIR:
+```bash
+# keep-alive probe so the server actually returns the Type-2
+printf 'GET / HTTP/1.1\r\nHost: %s\r\nAuthorization: NTLM TlRMTVNTUAABAAAAB4IIAAAAAAAAAAAAAAAAAAAAAAA=\r\nConnection: keep-alive\r\n\r\n' "$T" | openssl s_client -quiet -connect $T:443 2>/dev/null | grep -i 'WWW-Authenticate: NTLM'
+# then base64-decode the challenge and parse AV_PAIRS (2=NetBIOS domain, 1=NetBIOS computer,
+# 4=DNS domain, 3=DNS computer, 5=DNS tree/forest, 7=server timestamp)
+```
+Tools: `nmap --script http-ntlm-info, ntlm-info`, `metasploit auxiliary/scanner/http/ntlm_info_enumeration`, or a short Python `ntlmssp` decoder. Endpoints that commonly leak: `/ews/`, `/rpc/`, `/autodiscover/`, `/oab/`, `/aspnet_client/`, `/_vti_bin/`, `/owa/`.
+
+### Where it matters now
+- **Internal DNS/forest + computer name** feed targeted phishing, AD recon, and (internally) NTLM-relay/coercion chains (PetitPotam/`AuthIP`); on an external web program the standalone leak is usually Low/Informational — **set severity by what topology it actually exposes**, don't inflate.
+- **`WIN-XXXXXXXXXXX` default hostnames** signal unmanaged/forgotten provisioning — a recon lead, not a finding by itself.
+
+## Remediation
+
+- Don't offer `WWW-Authenticate: NTLM`/`Negotiate` to anonymous internet clients; require a pre-auth gateway (VPN/ZTNA) or front with Kerberos-only + conditional access.
+- Strip/normalize internal AV_PAIRS at the edge; use non-identifying hostnames; disable legacy NTLM where possible.
 
 ## Related Skills & Chains
 

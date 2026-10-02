@@ -3,6 +3,9 @@ name: hunt-api-misconfig
 description: "Hunt API security misconfiguration — mass assignment, prototype pollution, HTTP verb tampering. Mass assignment: send {is_admin:true, role:admin, verified:true} on profile/account/reset endpoints — server blindly applies. JWT signature/crypto forging (alg:none, key confusion, kid/jku) is owned by hunt-jwt-crypto; this skill covers only non-crypto JWT handling. Prototype pollution: __proto__ injection in JSON merge / Object.assign / lodash _.merge → polluted prototype reaches sink (RCE in Node, XSS in browser). HTTP verb: GET-bypass-CSRF, X-HTTP-Method-Override, TRACE enabled. Detection: API responses with extra fields, JWTs in headers (decode at jwt.io). CORS misconfiguration (reflect-any-origin, null origin, subdomain-regex bypass, postMessage) is owned by hunt-cors. Use when hunting API misconfigs, mass-assignment, prototype pollution (JWT crypto → hunt-jwt-crypto)."
 sources: hackerone_public, owasp_api_top10_2023, public_research
 report_count: 0
+cwe: [CWE-915, CWE-1321, CWE-650, CWE-16, CWE-285]
+cvss_baseline: "Medium (6.1) verb-tamper/TRACE → High (7.5-8.1) mass-assignment privilege set or SSPP SSRF → Critical (9.8) prototype-pollution RCE or admin-takeover via mass assignment."
+related_skills: [hunt-jwt-crypto, hunt-cors, hunt-idor, hunt-nodejs, hunt-prototype-pollution, hunt-shadow-api]
 ---
 
 ## 12. API SECURITY MISCONFIGURATION
@@ -257,6 +260,34 @@ Tools: `kiterunner` natively eats OpenAPI; `sj` (Swagger Jacker), `apidetector`,
 5. Test `?configUrl=` and `?url=` parameter handling on every Swagger UI hit.
 
 ---
+
+## New Techniques (2024-2026)
+
+### Mass assignment → privilege / tenant escalation (BFLA-adjacent)
+Beyond `is_admin`, probe fields the UI never sends, discovered from GET responses, OpenAPI, or GraphQL introspection:
+```json
+PATCH /api/users/me {"role":"ADMIN","org_id":"VICTIM_ORG","email_verified":true,
+  "balance":100000,"permissions":["*"],"owner":true,"plan":"enterprise"}
+```
+Nest them where the parser merges deep: `{"user":{"role":"admin"}}`, `user[role]=admin`, and array/JSON variants. Flip on PUT/PATCH/POST and on creation endpoints (self-register as admin).
+
+### GraphQL mass assignment & BFLA
+Mutations frequently accept an entire input object → set privileged fields the schema didn't restrict; introspect for `updateUser`/`adminSet*` and pass extra keys. Cross-ref `hunt-fintech-graphql`.
+
+### HTTP verb & method-override tampering
+`X-HTTP-Method-Override: PUT`, `_method=DELETE`, `GET` on a state-changing route to dodge CSRF/authz that only guards POST; `TRACE`/`TRACK` enabled → XST/debug; `OPTIONS` reveals allowed verbs that bypass per-verb auth.
+
+### Prototype pollution via API merge
+`__proto__`/`constructor.prototype` in JSON bodies reaching `_.merge`/`Object.assign`/`qs` → DoS, authz-bypass (polluted `isAdmin` default), or RCE sink in Node (cross-ref `hunt-prototype-pollution`, `hunt-nodejs`). Confirm pollution persists to a later request.
+
+### Server-Side Parameter Pollution (SSPP) in backend URL building
+A gateway builds an internal URL from your input; inject `#`, `&`, `?`, `/` to append/override backend params (`GET /api/userinfo?id=ME%26admin=true`) → reach internal params or SSRF. (Expanded in the SSPP section above.)
+
+## Remediation
+
+- Bind only an explicit allowlist of writable fields per endpoint (DTO/serializer allowlist); never mass-bind request bodies to ORM models; set privileged fields server-side only.
+- Null-proto / sanitized merge for user JSON (reject `__proto__`,`constructor`,`prototype`); patched lodash; freeze `Object.prototype`.
+- Enforce the same authz on every verb; disable method-override headers and `TRACE`/`TRACK`; validate/encode any user input used to build backend URLs.
 
 ## Related Skills & Chains
 
