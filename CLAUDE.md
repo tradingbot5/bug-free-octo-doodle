@@ -93,20 +93,46 @@ pre-auth critical (e.g. an exposed admin/RCE surface) is already in hand.
 
 Run from `recon/` (and `newskills/web2-recon`, `newskills/recon-scope-triage`).
 Write every artifact to `${OUTPUT_DIR}`. This mirrors STRICTRULES.MD Phase 1,
-organized by purpose.
+organized by purpose and grounded in the public expert methodology bodies in
+Section 9 (Jason Haddix's TBHM, Assetnote continuous recon, ProjectDiscovery
+toolchain, tomnomnom's unix-pipe recon, OWASP WSTG/Amass).
 
-### R0 — Scope confirmation (gate)
-- Lock the canonical in-scope domains/apps, allowed test classes, rate limits,
-  and stop conditions. Establish the SSO tenant/brand as an ownership anchor.
-- Triage any ASM/recon feed for namespace collisions before testing
-  (`newskills/recon-scope-triage`). Quarantine anything not provably owned.
+**Recon is where bugs are won.** Depth of surface, not cleverness of payload,
+decides the engagement — extract every subdomain, host, route, parameter,
+object ID, and fingerprint before the first exploit. Prefer a wide, mature,
+paid program with frequently-changing assets; new features and freshly-acquired
+infrastructure are the least-tested surface.
+
+### R0 — Scope, program selection & expansion (gate)
+- Lock the canonical in-scope domains/apps, eligible classes, rate limits, and
+  stop conditions. Establish the SSO tenant/brand as an ownership anchor.
+- **Expand scope legitimately**: enumerate the org's acquisitions and
+  subsidiaries (Crunchbase, press releases), reverse-WHOIS on registrant
+  org/email (`whoxy`), and trademark/ASN pivots — then check each against the
+  program policy before touching it.
+- **ASN → CIDR**: `amass intel -asn <ASN>`, `asnmap -d <domain>`, `bgp.he.net`
+  to recover owned IP ranges (a classic Haddix/Assetnote wide-recon move).
+- Triage every ASM/recon feed for namespace collisions before testing
+  (`newskills/recon-scope-triage`). Ownership is guilty-until-proven;
+  quarantine anything not provably owned.
 
 ### R1 — Asset discovery (surface mapping)
-- Passive subdomains: `subfinder`, `amass` (passive), `chaos`, `assetfinder`;
-  certificate transparency (`crt.sh`, filter by cert Organization).
-- Alternative sources: Shodan/Censys/FOFA (favicon-hash, cert pivots), GitHub
-  code search, SecurityTrails, Rapid7 FDNS, Wayback host lists.
-- Brute/permute with a wordlist from `payloads/`; resolve with `dnsx`.
+- **Passive subdomains (breadth first):** `subfinder` (load API keys for all
+  sources), `amass enum -passive`, `assetfinder`, `github-subdomains` /
+  `gitlab-subdomains`, `chaos`; CT logs via `crt.sh` (filter by cert
+  Organization) and `certspotter`. Aggregate + dedupe with `anew`.
+- **Search-engine infra sources:** Shodan, Censys, FOFA, ZoomEye, Netlas,
+  Quake — unify with `uncover`. Pull `ssl.cert`, `http.favicon.hash`, and
+  `http.html` pivots to find siblings. SecurityTrails, VirusTotal, AlienVault
+  OTX, DNSDumpster, Rapid7 FDNS for historical DNS.
+- **Favicon-hash pivot:** compute the mmh3 favicon hash and pivot in
+  Shodan/FOFA (`fav-up`) to find same-app hosts behind different names;
+  **JARM** fingerprint to cluster infra.
+- **Cloud asset enumeration:** `cloud_enum`, `cloudlist`, S3/GCS/Azure bucket
+  brute (`S3Scanner`, `GCPBucketBrute`) seeded from the brand + permutations.
+- **Active DNS brute + permutation (depth):** `puredns bruteforce` /
+  `shuffledns` + `massdns` with Assetnote's `best-dns-wordlist`; permute with
+  `gotator`/`dnsgen`/`alterx`; resolve and wildcard-filter with `dnsx`.
 - Confirm ownership (ASN/BGP, RDAP registrant, DNS chain to an owned apex)
   before accepting an asset.
 
@@ -124,24 +150,46 @@ organized by purpose.
   (`id= file= redirect= url= token= next= callback=`).
 
 ### R4 — Content & parameter discovery
-- Directory/file fuzzing: `ffuf`/`feroxbuster` with `payloads/` wordlists
-  (recursive where sensible); calibrate against a soft-404 control.
-- Sensitive files: `.env`, `.git/`, `.svn/`, backups (`~`/`.bak`/`.swp`),
-  `config.*`, `/debug`, `/actuator`, source maps.
-- Hidden parameters: `arjun`/`x8`/Param Miner.
-- API routes: `kiterunner` and bundle-derived routes (`newskills/hunt-shadow-api`,
-  `newskills/hunt-spa-api`).
-- Non-exploit Nuclei (`tech-detect`, `misconfiguration`, `exposures`) from
-  `nuclei-templates/` with strict rate limits; **manually verify every hit.**
+- **Directory/file fuzzing:** `ffuf`/`feroxbuster` with **Assetnote wordlists**
+  (`httparchive_directories`, `raft`, `commonspeak2`) and `payloads/`;
+  recursive where sensible, add tech-appropriate extensions; always calibrate
+  against a soft-404/junk-path control (per `newskills/recon-scope-triage`).
+- **403/401 bypass** on discovered-but-blocked paths: `byp4xx`/`nomore403` and
+  manual tricks — path-case, `//`, `/.`, `/%2e/`, `;/`, trailing `..;/`,
+  `X-Original-URL`/`X-Rewrite-URL`, method swap, `X-Forwarded-For`. (Feeds
+  `newskills/hunt-auth-bypass`, `newskills/hunt-host-header`.)
+- **VHOST fuzzing** (`ffuf -H "Host: FUZZ.target"`) to reach internal apps on
+  shared IPs.
+- **Sensitive files/exposure:** `.env`, `.git/`/`.svn/` (`git-dumper`),
+  backups (`~`/`.bak`/`.old`/`.swp`), `config.*`, `/debug`, `/actuator`,
+  `/.well-known`, source maps, `DS_Store` (`ds_store_exp`).
+- **Hidden parameters:** `arjun`/`x8`/Param Miner (headers + body + query);
+  seed from the master param list built in R3.
+- **API routes:** `kiterunner` (`kr` with route-kite wordlists) and
+  bundle-derived routes (`newskills/hunt-shadow-api`, `newskills/hunt-spa-api`);
+  pull Swagger/OpenAPI/GraphQL schemas.
+- **Non-exploit Nuclei** (`tech-detect`, `misconfiguration`, `exposures`,
+  `takeovers`) from `nuclei-templates/` with strict rate limits; chain
+  `subfinder → httpx → nuclei` and **manually verify every hit.**
 
-### R5 — Client-side / JS / source analysis
-- Download every bundle; extract endpoints/hosts/secrets with `jsluice`,
-  LinkFinder, regex (`recon/js-secrets-extraction`,
+### R5 — Client-side / JS / source analysis (read JS like source code)
+- **Harvest every bundle:** `subjs`/`getJS` + the R3 crawl; then extract
+  endpoints/hosts/params/secrets with **`jsluice`** (parser-based, beats
+  regex), `LinkFinder`/`xnLinkFinder`, and `SecretFinder` (`recon/js-secrets-extraction`,
   `newskills/hunt-source-leak`).
-- Reconstruct source from `*.js.map` (`sourcemapper`); don't stop at
-  HTML-referenced bundles — follow webpack async chunks and `__NEXT_DATA__`/RSC.
-- Classify secrets before claiming impact (most `AIza*` keys are Maps/analytics;
-  validate reachability).
+- **Reconstruct source from `*.js.map`** (`sourcemapper`/`unwebpack-sourcemap`)
+  to read original TS/JSX — route names, auth logic, feature flags, hidden
+  endpoints. Don't stop at HTML-referenced bundles: follow webpack async-chunk
+  maps, `__NEXT_DATA__`/RSC (`self.__next_f`), `window.__ENV`, `/config.js`.
+- **Secret scanning + validation:** `trufflehog`/`gitleaks` over the downloaded
+  tree; classify before claiming impact (most `AIza*` are Maps/analytics —
+  test `identitytoolkit`; `sk_live_`/`AKIA`/`ghp_`/`xoxb-` validate
+  reachability). Check **git history**, not just HEAD.
+- **Dependency-confusion leads:** internal package names in bundles/
+  `package.json` not on the public registry → `newskills/supply-chain-attack-recon`.
+- **Mobile feeds web:** pull endpoints/keys from APK/IPA
+  (`apk-redteam-pipeline`, `ios-redteam-pipeline`) — mobile backends are often
+  an older, less-guarded API version (`newskills/hunt-shadow-api`).
 
 ### R6 — Port & service discovery
 - `naabu`/`nmap`/`masscan` for open ports (22, 3306, 6379, 9200, 5432, 3389,
@@ -155,6 +203,20 @@ organized by purpose.
   trust boundaries.
 - Map each signal to a hunting skill (Section 5 routing table). Prioritize by
   impact potential and duplication risk.
+
+### R8 — Continuous recon & monitoring (the expert edge)
+The highest-ROI assets are the ones that appeared *since the last hunter looked*.
+- **Automate the pipeline** so it reruns on a schedule: `axiom`/`osmedeus`/
+  `reconFTW`/`reNgine`, or a simple cron of
+  `subfinder → dnsx → httpx → nuclei` piping new results through `anew` into
+  `notify` (Slack/Discord/Telegram).
+- **Diff over time** — alert on new subdomains, new live hosts, new JS bundles,
+  changed `httpx -hash`/titles, and new open ports. Hit new assets first.
+- **Monitor for subdomain takeover continuously** (`subzy`/`nuclei takeovers`)
+  and for newly-disclosed CVEs affecting the target's fingerprinted stack
+  (`cvemap`, vendor advisories).
+- Keep a per-target **knowledge base** in `${OUTPUT_DIR}` (hosts, tech, params,
+  IDs, auth flows) so every session builds on the last.
 
 ---
 
@@ -184,6 +246,20 @@ organized by purpose.
   mid-engagement; keep the surface report live.
 - **Minimal footprint.** Low-and-slow, no destructive probes, honor robots of
   engagement over robots.txt.
+- **Automate the boring, think on the interesting.** Pipe tools together
+  (tomnomnom-style: `httpx | gf | ffuf`), save everything, and spend human
+  attention on logic and chaining — not on work a tool does better.
+- **Wordlists are a force multiplier.** Use curated, target-shaped lists
+  (Assetnote, SecLists, `commonspeak2`) over generic ones; build custom lists
+  from the target's own JS/responses.
+- **Hunt where others don't.** Mobile/legacy/`/v1/` APIs, staging/dev/preview
+  hosts, GraphQL, webhooks, import/export, and brand-new features have the
+  lowest duplication rate and the weakest controls.
+- **Read JS as source.** The frontend ships the backend's route map, roles,
+  and sometimes secrets — map the API from the bundle, then test the API, not
+  the UI.
+- **Keep the surface report live.** Recon never fully ends; re-run on a cadence
+  and attack the delta first (R8).
 
 ---
 
@@ -193,6 +269,37 @@ After R7, load the skill whose **Attack Surface Signals** match. Each skill
 documents methodology, current techniques, remediation, and a validation gate.
 Use `newskills/bb-methodology` or `newskills/hunt-dispatch` to orient, and
 `newskills/security-arsenal` for the payload bank.
+
+### Expert operating model (how top hunters actually work)
+
+Grounded in the public methodology of practitioners in Section 9 and the
+HackerOne Hacktivity / PortSwigger "Top 10 Web Hacking Techniques" trend lines:
+
+1. **Pick one feature and go deep.** Exercise a single feature end-to-end
+   (create → read → update → delete → share → export → cancel), capturing every
+   request. Map its **state machine** — the forgotten transition is the bug.
+2. **Think like the developer.** Ask *where would they skip the check?* — a new
+   endpoint added after the middleware, a mobile/legacy path, a bulk/export
+   route, a second HTTP verb, a nested object. Authz bugs cluster at those
+   seams.
+3. **Baseline, then run "what-if" experiments.** Establish normal behavior,
+   change exactly one thing (an ID, a role, a param, a method, a content-type),
+   and diff status/length/timing/headers/behavior. One variable at a time.
+4. **Always test with two accounts and across roles/tenants.** Replay A's
+   requests as B (and as anon) — Burp **Autorize**/**AuthMatrix** make this
+   systematic. Cross-user/cross-tenant is the #1 paid class.
+5. **Test the API, not the UI.** The UI is a suggestion; the backend is the
+   target. Hit the routes from R5 directly, unauthenticated and under-privileged.
+6. **Chain primitives.** A lone open-redirect, info-leak, or read-IDOR is Low;
+   composed into OAuth-token theft, ATO, or financial impact it's Critical.
+   Every `hunt-*` skill has a **Chains & Compositions** section — use it, and
+   `chains/cross-attack-chains`.
+7. **Prioritize by real-world payout/signal** (highest first): broken access
+   control (IDOR/BOLA/BFLA), SPA→hidden-API exposure, SSRF→cloud-metadata,
+   business-logic/payment abuse, OAuth/SSO→ATO, injection→RCE, then the rest.
+   Don't grind low-impact header findings.
+8. **Verify before you believe.** A 200 isn't impact; confirm the crossed
+   boundary, record the negative control, pass `newskills/triage-validation`.
 
 **Access control & authorization**
 - `hunt-idor` — object-level authz (IDOR/BOLA), cross-tenant, chaining.
@@ -320,3 +427,41 @@ intended, say so.
 - Never push secrets or raw evidence into this repository — methodology only,
   evidence stays in `${OUTPUT_DIR}` and private stores.
 - Never skip the validation gate to pad a report.
+
+---
+
+## 9. Grounding — expert sources
+
+This harness distills publicly-available expert methodology and research. Use
+these as the authoritative references; cite the specific write-up you actually
+used, and **never fabricate a report ID, bounty amount, or quote.** When a
+`hunt-*` skill references a disclosed HackerOne report, link the exact verified
+URL — a missing citation beats a wrong one.
+
+**Methodology & recon**
+- Jason Haddix — *The Bug Hunter's Methodology (TBHM)* and recon talks (scope
+  expansion, ASN/acquisition pivots, content discovery).
+- Assetnote / Shubham Shah & Sean Yeoh — continuous recon, wordlists, Ground
+  Control; "how we find bugs at scale."
+- NahamSec, Ben Sadeghipour (`@nahamsec`/`@nahamsec`), Hakluke — recon workflow
+  and JS/asset discovery.
+- tomnomnom (Tom Hudson) — unix-pipe recon tooling (`gf`, `waybackurls`,
+  `httprobe`, `anew`, `unfurl`, `meg`, `gron`).
+- ProjectDiscovery — `subfinder`, `httpx`, `nuclei`, `katana`, `naabu`,
+  `dnsx`, `notify`, `uncover`, `cvemap`, `interactsh`.
+- OWASP — **Web Security Testing Guide (WSTG)**, **ASVS**, Amass.
+
+**Vulnerability research**
+- PortSwigger Research & **Web Security Academy**; James Kettle (albinowax) —
+  HTTP desync/smuggling, web cache poisoning, Param Miner.
+- Orange Tsai — SSRF, ProxyLogon/ProxyShell, request-routing attacks.
+- Frans Rosén (Detectify) — subdomain takeover, postMessage, cloud/OAuth.
+- Sam Curry, Corben Leo, and the broader HackerOne/Bugcrowd disclosed-report
+  corpus (**Hacktivity**) for class patterns and real reproduction shapes.
+- Well-written Medium/personal-blog write-ups **by recognized researchers** —
+  use for technique, verify the primitive yourself before relying on it.
+
+**How to use them here:** techniques enter a skill as *New Techniques
+(2024-2026)* only after being validated and expressed as a reproducible,
+responsibly-scoped procedure (SOUL.md). Expert write-ups inform the method; the
+proof must still come from your own authorized test.
