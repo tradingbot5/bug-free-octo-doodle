@@ -3,6 +3,9 @@ name: hunt-mfa-bypass
 description: "Hunt MFA / 2FA bypass — 7 distinct patterns. (1) MFA not enforced on sensitive endpoints (password change, email change accept without MFA challenge), (2) MFA-step skip via direct navigation to post-login URL, (3) MFA-token replay (same code accepted twice), (4) brute-force the 6-digit OTP without rate limit (10^6 attempts at server speed), (5) race condition on OTP validation, (6) recovery-code dump via /api/me, (7) backup factor downgrade (SMS factor with no rate limit). Plus the chain: cookie theft + password oracle + no step-up = ATO without MFA challenge. Detection: trace auth flow in Burp, find every state transition, check if MFA is middleware-gated vs per-endpoint, check OTP entropy and rate limit on OTP-validate. Validate: attacker session reaching post-MFA state. Use when hunting auth bypass, MFA flows, chaining primitives toward ATO."
 sources: hackerone_public, cve_database, nist_800_63b, public_research
 report_count: 5
+cwe: [CWE-287, CWE-307, CWE-308, CWE-640, CWE-384]
+cvss_baseline: "High (8.1) MFA bypass requiring known password → Critical (9.8) bypass from cookie-only/no-credential state, or enroll-side takeover. Bypass needing the victim's password already = High, not Critical."
+related_skills: [hunt-ato, hunt-race-condition, hunt-auth-bypass, hunt-forgot-password, hunt-brute-force, hunt-oauth]
 ---
 
 ## Autonomous Testing Priority
@@ -122,6 +125,54 @@ OTP reuse = persistent session hijack = High
 ```
 
 ---
+
+## New Techniques (2024-2026)
+
+### Pattern 8: Enroll-side takeover (bind attacker's factor to victim)
+Most teams harden *verify* and forget *enroll*. If the "add authenticator" / "enroll TOTP" / "set phone" endpoint is IDOR-able or doesn't require step-up:
+```
+POST /api/mfa/totp/enroll   {"user_id":"VICTIM","secret":"ATTACKER_SEED"}   # IDOR on enroll
+POST /api/mfa/phone         {"phone":"+attacker"}                           # overwrite victim's factor
+```
+Now the attacker's TOTP/phone satisfies the victim's MFA → ATO. Also check the enroll **response** / QR provisioning URI: many leak the raw `secret=` (base32 TOTP seed), letting the attacker generate valid codes forever. Cross-ref `hunt-idor`.
+
+### Pattern 9: Alternate flow that never enforces MFA
+MFA is enforced on password login but skipped on another entry point for the same account:
+- **Password reset → auto-login** without MFA (reset the password, land authenticated). Cross-ref `hunt-forgot-password`.
+- **OAuth/social login** or SSO path that trusts the IdP and bypasses local MFA.
+- **"Login with magic link"**, mobile/API token, or long-lived refresh token issued pre-MFA.
+- **Remember-me / persistent cookie** set before the MFA step.
+
+### Pattern 10: Factor downgrade / recovery abuse
+- Downgrade from TOTP/WebAuthn to SMS or email OTP (weaker, brute-forceable, SIM-swappable), or to security questions.
+- **WebAuthn/passkey downgrade** — if the flow offers "use another method", force the fallback to a brute-forceable factor.
+- Recovery/backup-code flow with weaker or no rate limit than the primary OTP.
+
+### Pattern 11: Enabled-flag / response tamper at enroll
+Flip `{"mfa_required":false}` / `{"mfaEnabled":true}` in a profile or enroll response the client trusts, or disable MFA on the victim via a mass-assignment field (`PATCH /users/{id} {"mfa_enabled":false}`). Cross-ref `hunt-api-misconfig`.
+
+### Pattern 12: Null / type-confusion OTP
+`{"otp":null}`, `{"otp":[]}`, `{"otp":true}`, `{"otp":"000000"}`, or omitting the field entirely — weak comparisons (`==`, loose truthiness) sometimes accept these. Also test leading-zero/format confusion (`"0123"` vs `123`).
+
+## Remediation
+
+- Enforce MFA server-side on every authenticated transition, not just the `/mfa` route; the post-login session must not be privileged until MFA completes.
+- Require step-up re-auth to enroll/replace/disable a factor; never trust a client-supplied `user_id` on enroll; never return the TOTP secret after provisioning beyond the initial QR.
+- Single-use OTP, invalidated on use and on new issuance; strict per-account+per-IP rate limit and lockout; constant-time full-value comparison (no prefix/partial validation).
+- Close every alternate path: reset, SSO, magic-link, and refresh tokens must honor MFA state; bind "remember device" to a hardened cookie and re-verify periodically.
+
+## Validation Gate
+
+- Prove the attacker session reaches post-MFA state (or enrolls a factor on the victim) in a test account — a session token or protected data without a legitimate OTP.
+- State the precondition honestly: cookie-only/no-credential bypass = Critical; needs the victim's password = High.
+
+## Disclosed Report Patterns
+
+Verify before quoting IDs/amounts.
+- **MFA enforced in UI only / skip-step via direct navigation** — the most common disclosed MFA bug.
+- **OTP missing rate limit → brute** and **OTP replay** — recurring medium→high.
+- **Enroll IDOR / TOTP-secret leak in provisioning response** — high-value, frequently overlooked.
+- **Password reset bypasses MFA** — common chain to full ATO.
 
 ## Related Skills & Chains
 

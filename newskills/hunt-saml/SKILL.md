@@ -1,8 +1,11 @@
 ---
 name: hunt-saml
 description: "Hunt SAML / SSO attacks. Patterns: XML Signature Wrapping (XSW) — modify Assertion while keeping Signature valid by relocating signed element, comment injection in NameID (admin@target.com<!--evil-->@attacker.com → some parsers see admin@target.com), signature stripping (remove Signature element entirely, server should reject but doesn't), key confusion (signed by attacker's IdP, accepted by SP), audience-restriction not validated, replay attack (same Assertion accepted twice within validity window). Tools: SAML Raider Burp extension, samlmagic, manual XML manipulation. Detection: any /saml endpoint, /Shibboleth.sso, /sso/saml/, Microsoft ADFS endpoints. Validate: account takeover via altered NameID, admin role injection via altered AttributeStatement. Use when hunting SSO flows, when SAML AssertionConsumerService is reachable, when chaining IdP-trust to SP-impersonation."
-sources: cve_database, oasis_saml_spec, academic_research, public_research
+sources: cve_database, oasis_saml_spec, academic_research, public_research, github_security_lab
 report_count: 6
+cwe: [CWE-347, CWE-345, CWE-287, CWE-611, CWE-290]
+cvss_baseline: "High (8.1) assertion forgery to a normal user → Critical (9.8+) admin/any-user ATO or cross-tenant federation bypass. Non-security attribute tamper with no auth-decision change = Informational."
+related_skills: [hunt-auth-bypass, hunt-ato, hunt-oauth, hunt-xxe, hunt-open-redirect, triage-validation]
 ---
 
 ## 20. SAML / SSO ATTACKS
@@ -99,6 +102,38 @@ Comment injection = High (ATO admin)
 XXE in assertion = High (file read / SSRF)
 NameID manip     = Medium/High (depends on what NameID maps to)
 ```
+
+### Attack 6: Parser-differential / canonicalization round-trip (2024-2025 wave)
+The modern high-impact SAML bug class is a **parser differential**: the library verifies the signature over one DOM, then re-parses/re-serializes the document and reads attributes from a *different* DOM. Namespace tricks, nested elements, and C14N round-trips move the effective NameID without breaking the signature.
+- **ruby-saml CVE-2024-45409** — improper verification let a crafted response forge a valid assertion (critical across GitLab/many Ruby apps). 
+- **GitHub Enterprise Server XSW CVE-2025-25291 / CVE-2025-25292** (ruby-saml) — signature wrapping → authentication bypass / ATO.
+- **samlify CVE-2025-47949** — signature-wrapping assertion forgery in the Node `samlify` library.
+Probe: feed SAMLRaider's XSW1-XSW8 permutations AND namespace/round-trip variants; watch for any that authenticate as a different NameID.
+
+### Attack 7: Condition / Recipient / InResponseTo validation gaps
+Even with a valid signature, SPs must validate the assertion's *conditions*. Test each independently:
+- **AudienceRestriction** not checked → an assertion minted for IdP-A's SP accepted by SP-B (cross-tenant).
+- **NotBefore / NotOnOrAfter** not enforced → **assertion replay** outside the window; capture a valid assertion and resubmit hours later.
+- **Recipient / Destination / InResponseTo** not bound → replay an IdP-initiated assertion against an SP-initiated flow, or cross-SP replay.
+- **One-time-use (replay cache) absent** → same signed assertion accepted twice = ATO with a sniffed assertion.
+
+### Attack 8: RelayState open redirect / injection
+`RelayState` is attacker-influenceable and often used as the post-login redirect target → open redirect (`RelayState=//attacker`) that can steal the next auth artifact. Cross-ref `hunt-open-redirect`. Also test RelayState for stored XSS when reflected.
+
+### Tooling (expanded)
+- **SAMLRaider** (Burp) — XSW automation + cert cloning for key-confusion tests.
+- **samling / samldumper / python3-saml test vectors** — craft assertions.
+- **xmlsec1 / xmllint** — inspect C14N behavior and reproduce the signer-vs-reader differential locally.
+
+### Remediation
+- Verify the signature over the exact DOM that is used to read assertions (no re-parse between verify and read); use a hardened, patched SAML library.
+- Enforce `wantAssertionsSigned`/`wantMessagesSigned`, reject unsigned/stripped assertions, pin the IdP certificate (no key-confusion), and validate Audience, Recipient, Destination, InResponseTo, and NotBefore/NotOnOrAfter.
+- Maintain a one-time-use replay cache keyed on assertion ID; disable DOCTYPE/external entities in the XML parser (XXE).
+- Allowlist RelayState redirect targets.
+
+### Validation Gate
+- Prove a crossed authorization boundary: authenticate as a *different* NameID / gain a role you shouldn't, in a test tenant. Capture the modified SAMLResponse and the resulting authenticated session.
+- Non-security attribute changes (display name, locale) that don't alter NameID/AuthnContext/role attributes are Informational.
 
 ---
 
