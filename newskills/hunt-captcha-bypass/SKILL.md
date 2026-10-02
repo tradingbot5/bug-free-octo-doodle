@@ -1,8 +1,11 @@
 ---
 name: hunt-captcha-bypass
 description: "Hunt CAPTCHA Bypass — 6 distinct patterns: (1) CAPTCHA field simply omitted from the request (server-side validation absent), (2) CAPTCHA token replayed from a solved challenge (no single-use enforcement), (3) CAPTCHA response accepted on a different endpoint than it was solved on (no binding to action/session), (4) static or predictable CAPTCHA values accepted (e.g. '0', 'null', empty string), (5) audio/accessibility CAPTCHA trivially solvable programmatically, (6) CAPTCHA only enforced after N failures (first N requests bypass it). Detection: intercept a successful form submission, remove the CAPTCHA field entirely, replay — if it still succeeds, server-side validation is absent. Medium severity standalone; High when it removes the only rate-limit gate protecting a login, registration, or payment endpoint."
-sources: public_research, operator_experience
+sources: public_research, operator_experience, google_recaptcha_docs, cloudflare_turnstile_docs
 report_count: 6
+cwe: [CWE-804, CWE-307, CWE-287, CWE-863]
+cvss_baseline: "Low (3.7) standalone automation-gate removal → Medium (5.3) on registration/reset → High (7.5-8.1) when it unlocks login brute-force or OTP brute reaching ATO."
+related_skills: [hunt-brute-force, hunt-forgot-password, hunt-race-condition, hunt-mfa-bypass, hunt-ato]
 ---
 
 ## Autonomous Testing Priority
@@ -72,6 +75,54 @@ Some apps only show CAPTCHA after 3-5 failed login attempts. Before that thresho
 Math CAPTCHAs (`3 + 4 = ?`), simple image CAPTCHAs, or text CAPTCHAs with a finite answer set can be automated. These are custom CAPTCHA implementations, not Google/hCaptcha.
 
 ---
+
+## New Techniques (2024-2026)
+
+### 6. Provider verify-endpoint misuse (reCAPTCHA / hCaptcha / Turnstile)
+The server-side verify call is where most real bypasses live now:
+- **Missing `hostname`/`action` check** — the siteverify response includes `hostname` (reCAPTCHA) and `action` (v3). Apps that ignore them accept a token solved on *any* site using the same key, or a token minted for a different action. Solve a cheap challenge on a low-value page, replay on the high-value one.
+- **reCAPTCHA v3 score threshold too low / not enforced** — v3 returns a `score` (0.0-1.0). If the backend doesn't gate on it (or accepts `success:true` regardless of score), automation sails through. Also test the v2 checkbox fallback that many v3 sites keep.
+- **Test/sandbox keys in production** — Google's test key `6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI` (and hCaptcha's `10000000-ffff-ffff-ffff-000000000001` / secret `0x0000...`) always validate. Grep JS bundles for these.
+- **Enterprise reCAPTCHA assessment reuse** — the `assessment` is single-use; apps that cache or don't `annotate` can be replayed.
+- **Turnstile** — check for missing `cdata`/idempotency binding and token reuse window.
+
+### 7. Response-shape confusion / client-trusted result
+Some SPAs verify the CAPTCHA client-side and send a boolean (`"captchaValid":true`) or the raw provider response to the server, which trusts it. Flip the boolean or forge the JSON.
+
+### 8. Mobile / GraphQL / legacy path gaps
+The web form enforces CAPTCHA; the mobile API (`/api/v2/login`), GraphQL mutation, or an older `/legacy/` route does not. Enumerate alternate entry points for the same action (overlaps `hunt-shadow-api`).
+
+### 9. Race the revocation window
+Even with single-use enforcement, fire many requests with the same freshly-solved token **concurrently** before the backend marks it consumed (TOCTOU). Pairs with `hunt-race-condition`.
+
+### 10. Human-solver economics note (authorized only)
+2captcha/anti-captcha services solve real challenges cheaply. Mention feasibility in impact ("rate gate is economically defeatable at ~$1/1000"), but do not operationalize bulk solving against a live program — demonstrate the *bypass*, argue the economics.
+
+## Tooling
+
+- **Burp Repeater/Intruder** — omit/replay/forge token; **Turbo Intruder** for the revocation race.
+- **Grep JS** for site keys and the known test keys above.
+- **siteverify replay script** — capture one valid token, script N replays to prove single-use is not enforced.
+
+## Remediation
+
+- Verify server-side on every submission; enforce `success` AND `score` (v3) AND `hostname` AND `action` match the expected page/action.
+- Enforce single-use (consume the token atomically before processing) and short expiry; bind the token to session + action.
+- Apply CAPTCHA uniformly across web, mobile, GraphQL, and legacy paths for the same action; never trust a client-supplied "valid" flag.
+- Rotate out any test/sandbox keys before production.
+
+## Validation Gate
+
+- Demonstrate a real state-changing action completing without a valid, correctly-scoped token (baseline-with-token vs probe-without).
+- For replay/single-use, show the *second* use of a consumed token succeeding.
+- Keep volume minimal — prove the bypass with a handful of requests; do not mass-create accounts or flood.
+
+## Disclosed Report Patterns
+
+Verify before quoting IDs/amounts.
+- **Missing hostname/action validation in siteverify** — recurring medium H1 pattern enabling cross-site token reuse.
+- **Test key shipped to production** — periodic disclosures across SaaS login/registration.
+- **CAPTCHA on web but absent on mobile/API path** — common gap that unlocks brute-force → ATO.
 
 ## Impact Chain
 

