@@ -3,6 +3,9 @@ name: hunt-cors
 description: "Hunt CORS Misconfiguration — origin-reflection with credentials, null-origin trust, subdomain-regex bypass (unanchored vs unescaped-dot vs prefix-only), pre-flight (OPTIONS) gating bypass, postMessage origin checks. High only when an attacker-controlled origin can perform a CREDENTIALED cross-origin read of sensitive data and you have proven it in a browser. Use when testing API endpoints, SPAs, or any app emitting Access-Control-* headers."
 report_count: 19
 sources: hackerone_public
+cwe: [CWE-942, CWE-346, CWE-639]
+cvss_baseline: "Medium (5.3) reflected origin on non-sensitive data → High (7.5-8.1) credentialed cross-origin read of secrets/PII proven in a browser. ACAO:* without credentials on public data = Informational."
+related_skills: [hunt-csrf, hunt-dom, hunt-spa-api, hunt-oauth]
 ---
 
 # HUNT-CORS — Cross-Origin Resource Sharing Misconfiguration
@@ -261,6 +264,33 @@ Every automated hit is a lead, not a finding. Reproduce 5a/5b in a browser.
 | postMessage no/loose origin check | hunt-dom: inject iframe, send crafted message | DOM XSS / client auth bypass |
 
 ---
+
+## New Techniques (2024-2026)
+
+### Origin-reflection & allowlist-regex bypasses (test each)
+```
+Origin: https://evil.com                      # blind reflection + ACAC:true = critical
+Origin: null                                   # sandboxed iframe / data: / redirect sends null — if trusted, any site forges it
+Origin: https://target.com.evil.com            # suffix match (endsWith "target.com" bug)
+Origin: https://eviltarget.com                 # prefix/substring (startsWith/contains)
+Origin: https://target.com.evil.com  / sub.target.com.evil.com   # unanchored regex
+Origin: https://target-com.evil.com            # unescaped dot in regex
+Origin: http://target.com                      # scheme downgrade accepted
+Origin: https://attacker.target.com            # any-subdomain allow → chain subdomain takeover/XSS
+```
+The payout condition is unchanged: **credentialed read** (`Access-Control-Allow-Credentials: true` + reflected attacker origin) of sensitive data, proven by a PoC that `fetch(..., {credentials:'include'})` from an attacker origin and reads the body.
+
+### Chains & related sinks
+- **ACAO allowlists a subdomain you can take over / XSS** → effective CORS bypass (cross-ref `hunt-subdomain`, `hunt-xss`).
+- **Preflight gaps** — server honors the request even when the OPTIONS preflight would reject (non-preflighted simple requests, or preflight not enforced).
+- **`postMessage` origin checks** (`*`/missing) are the client-side analogue — cover in `hunt-dom`.
+- **Cache + CORS**: a reflected `ACAO` cached into a shared response (`hunt-cache-poison`).
+
+## Remediation
+
+- Never reflect arbitrary `Origin`; use a strict server-side allowlist of exact origins (scheme+host+port), and only send `Access-Control-Allow-Credentials: true` for those.
+- Never combine `ACAO: *` with credentials; reject `null` origin; match origins by exact comparison, not `startsWith`/`endsWith`/`contains`/unanchored regex.
+- Keep sensitive data behind endpoints that don't emit permissive CORS; audit subdomains in any allowlist for takeover/XSS.
 
 ## Validation discipline (read before submitting)
 

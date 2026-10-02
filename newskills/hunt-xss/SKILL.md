@@ -1,8 +1,11 @@
 ---
 name: hunt-xss
 description: Hunting skill for xss vulnerabilities. Built from 174 public bug bounty reports. Use when hunting xss on any target. For markup injection that reflects raw HTML but does NOT execute JavaScript (no `<script>`/event-handler execution), see hunt-html-injection — escalate here once script execution is possible.
-sources: github, hackerone_public
+sources: github, hackerone_public, portswigger_research
 report_count: 174
+cwe: [CWE-79, CWE-80, CWE-116, CWE-83]
+cvss_baseline: "Medium (6.1) reflected on a meaningful origin → High (7.5-8.1) stored, same-origin token/session theft, or admin-panel blind XSS → Critical when it chains to ATO. Self-XSS with no delivery = Informational."
+related_skills: [hunt-html-injection, hunt-dom, hunt-prototype-pollution, hunt-csrf, hunt-cache-poison]
 ---
 
 ## Autonomous Testing Priority
@@ -440,6 +443,30 @@ Cross-references:
 - `hunt-ato` — terminal impact for Chains 2, 3, 4, 5
 
 ---
+
+## New Techniques (2024-2026)
+
+### Mutation XSS (mXSS) & sanitizer bypass
+Even behind DOMPurify/sanitizers, re-parsing turns "safe" markup into executing markup. Current bypass shapes: nested `<form>`/`<template>`, **MathML/SVG `foreignObject` namespace confusion**, `<noscript>`/`<style>` context switches, and attribute-vs-tag re-interpretation (DOMPurify 3.x bypasses disclosed through 2024-2025). Always test the *exact* sanitizer version + config, and look for a second `innerHTML`/`setHTML` sink after sanitization.
+
+### CSP bypass gadgets (when a CSP exists)
+A CSP isn't a fix — hunt the gadget: `base-uri` missing → `<base>` hijack of nonce'd scripts; `script-src 'strict-dynamic'` + a DOM gadget (createElement('script')) in a trusted lib; JSONP endpoints on an allowlisted host; AngularJS/`ng-app` CSP-bypass sandbox escape; nonce reuse across cached responses; `object-src`/`default-src` gaps.
+
+### DOM clobbering & client-side prototype pollution → XSS
+Markup-only injection (no `<script>`) can still reach a sink via clobbering a global or a PP gadget (`?__proto__[srcdoc]=...`). Cross-ref `hunt-dom`, `hunt-prototype-pollution`.
+
+### Blind / stored XSS in back-office
+Inject into values an **admin/support agent** later views (ticket body, user-agent logged to a dashboard, filename, referrer). Use a blind-XSS canary (XSS Hunter / ezXSS / Collaborator) carrying `document.domain`, cookies-presence, and DOM snapshot — a callback from an internal admin origin is High/Critical.
+
+### Server-side render contexts
+XSS via HTML injected into server-side **PDF/headless-Chrome** renders or **transactional emails** (audiences the web CSP can't protect). Cross-ref `hunt-html-injection`. WAF-bypass: SVG `<svg onload>`, rare event handlers, HTML-entity/charset tricks, `javascript:`/`data:` in sinks.
+
+## Remediation
+
+- Context-aware output encoding at every sink (HTML, attribute, JS, URL, CSS); rely on framework auto-escaping and avoid `dangerouslySetInnerHTML`/`v-html`/`bypassSecurityTrust*`.
+- Sanitize rich text with a current, strictly-configured sanitizer (server + client) and keep it patched for mXSS; adopt **Trusted Types** to gate DOM sinks.
+- Deploy a strict CSP (nonce + `strict-dynamic`, `object-src 'none'`, `base-uri 'none'`) as defense-in-depth, not the primary control; set `HttpOnly`+`SameSite` cookies to blunt session theft.
+- Isolate/forbid internal fetches in PDF/headless renderers; encode user data in emails.
 
 ## Related Skills & Chains
 

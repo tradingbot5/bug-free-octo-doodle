@@ -3,6 +3,9 @@ name: hunt-csrf
 description: Hunting skill for csrf vulnerabilities. Built from 15 public bug bounty reports including modern variants — SameSite=Lax sibling-subdomain bypass (Argo CD CVE-2024-22424), GraphQL mutations-via-GET (GitLab $3,370), framework-wide CSRF middleware disabled (Stripe Dashboard $5,000), path-traversal CSRF-token bypass (GitHub Enterprise CVE-2022-23732 $10k), Origin-omission bypass (TikTok $2,500), OAuth-state null-byte (Streamlabs), WebSocket CSRF / CSWSH (Coda), default-SameSite email-change → ATO (YoYo Games $400), social-account-link CSRF (HackerOne), JSON-CSRF via text/plain on email-change (TikTok $500). Use when hunting modern CSRF — heavy emphasis on chain-to-ATO patterns.
 sources: github, hackerone_public, bugcrowd_public, github_security_advisories
 report_count: 18
+cwe: [CWE-352, CWE-1275, CWE-346]
+cvss_baseline: "Low-Medium (4-6) low-value state change → High (7.1-8.1) when it reaches email/password change, OAuth account-link, or admin action → ATO. Needs a genuine cross-site, cookie-carried, state-changing request."
+related_skills: [hunt-clickjacking, hunt-cors, hunt-oauth, hunt-ato, hunt-websocket]
 ---
 
 ## Shortcut: a raw HTTP client beats a real cross-origin page for header-check CSRF
@@ -364,6 +367,30 @@ No Duende.BFF-direct CVE exists as of 2026-05. The three classes above are **des
 5. Subdomain inventory + DNS-takeover scan for any `*.example.com` if BFF cookie has `Domain=.example.com`.
 
 ---
+
+## New Techniques (2024-2026)
+
+### SameSite-era bypasses (the modern crux)
+`SameSite=Lax` default didn't kill CSRF — route around it:
+- **Top-level GET navigations are Lax-exempt** — any state change reachable via `GET` (or method-override) fires cross-site; hunt `GET`-accepting mutations and `?_method=POST`.
+- **Sibling-subdomain / same-site** — a bug or XSS on `*.target.com` is same-site, so Lax cookies ride (Argo CD CVE-2024-22424). An open subdomain = CSRF enabler.
+- **≤2-minute Lax window** (some browsers) — freshly-set cookies behave as None briefly.
+- **`SameSite=None` session cookies** (B2B/SSO) → classic CSRF fully alive.
+
+### Token-handling flaws
+Token not bound to session (use your own token on victim), token validated only when present (omit it), reflected/leaked token (via `hunt-open-redirect`/referrer), path-traversal token bypass (GHE CVE-2022-23732), double-submit cookie settable via subdomain, static/predictable token.
+
+### Content-type & parser tricks
+`text/plain`/`application/json` with a simple body the server still parses (JSON-CSRF via `<form enctype=text/plain>`), multipart boundary confusion, `navigator.sendBeacon`, missing `Origin`/`Referer` check (omit header → bypass).
+
+### WebSocket CSRF (CSWSH) & method/verb
+Cross-site WebSocket handshake with no origin check → cross-ref `hunt-websocket`; `X-HTTP-Method-Override` to turn a guarded POST into an unguarded verb.
+
+## Remediation
+
+- Prefer `SameSite=Strict`/`Lax` **plus** a synchronizer token (or Origin/Fetch-metadata check) — defense in depth; never rely on SameSite alone, especially with any `SameSite=None` cookie or open subdomain.
+- Per-session, unpredictable, server-validated CSRF tokens on every state-changing request (including GET-mutations — eliminate those); validate `Origin`/`Sec-Fetch-Site`.
+- Check WebSocket handshake `Origin`; re-authenticate/step-up for sensitive actions (email/password/OAuth-link).
 
 ## Related Skills & Chains
 

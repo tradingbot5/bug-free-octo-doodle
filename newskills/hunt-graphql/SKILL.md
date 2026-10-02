@@ -3,6 +3,9 @@ name: hunt-graphql
 description: Hunting skill for graphql vulnerabilities. Built from 12 public bug bounty reports across IDOR via node() / GID, mutation IDOR including AI/LLM features, cross-tenant IDOR, SSRF via argument, batching-DoS, query-cost-bypass, SQLi via argument, broken-object-level-authz, auth-bypass via unscoped mutations, and PII exposure from missing field-level authz. Use when hunting graphql on any target.
 sources: hackerone_public, github, gitlab_security
 report_count: 26
+cwe: [CWE-863, CWE-639, CWE-400, CWE-918, CWE-200]
+cvss_baseline: "High (7.5-8.1) field-level authz gap / cross-tenant IDOR / SSRF via argument → Critical (9.1-9.8) unscoped mutation ATO or injection-to-RCE. Introspection-on alone is Low/Info."
+related_skills: [hunt-fintech-graphql, hunt-idor, hunt-api-misconfig, hunt-ssrf, hunt-race-condition, hunt-spa-api]
 ---
 
 ## Crown Jewel Targets
@@ -357,6 +360,32 @@ The following real, verified bug-bounty / coordinated-disclosure cases extend th
     - Year: 2023 — "Best Bug" prize at HackerOne Ambassador World Cup
 
 ---
+
+## New Techniques (2024-2026)
+
+### Introspection-off is not security — recover the schema anyway
+- **Field suggestions** ("Did you mean ...") leak field names; **clairvoyance**/`graphql-cop`/`clairvoyanceng` brute the schema from suggestions.
+- Persisted-query hashes and operation names in JS bundles (`hunt-spa-api`); try `?query={__typename}` and common ops.
+- Tools: **GraphQL Raider**, **InQL**, **graphw00f** (engine fingerprint → engine-specific quirks).
+
+### Batching & alias abuse
+- **Alias-based brute/race**: `q{a:login(p:"1"){t} b:login(p:"2"){t} ...}` — hundreds of attempts in one request, bypassing per-request rate limits; same trick races limits (`hunt-race-condition`) and double-spends (`hunt-fintech-graphql`).
+- **Array batching** for the same effect where aliases are blocked.
+
+### DoS via query complexity (authorized/minimal only)
+Deeply nested cyclic relations (`a{b{a{b…}}}`), huge `first:`/pagination, `@include`/`@skip` fan-out, and field duplication can exhaust the resolver. Demonstrate the cost primitive with a small query + measured response growth — don't sustain an outage on a live program.
+
+### Authz & injection through arguments
+- **Field-level authz gaps**: top query authed, nested relation/`node(id:)` not → cross-tenant read; enumerate global IDs (base64 `Type:n`).
+- **Mutation IDOR / unscoped mutations**: `updateUser(id: victim)`, `deleteOrg`, `transferBilling` with no ownership check.
+- **Injection via arguments**: SQLi/NoSQLi/SSRF where a resolver passes an arg to a DB/URL sink (`url:`, `avatarUrl:`, `webhook:`). Cross-ref `hunt-ssrf`, `hunt-sqli`.
+- **CSRF via GET-GraphQL** and `application/json` bypass; **mass assignment** via input objects.
+
+## Remediation
+
+- Enforce authorization in every resolver (object + field level), not only at the entry query; re-check ownership on nested relations and `node(id:)`.
+- Disable introspection and field suggestions in production; use persisted/allowlisted queries; set query depth/complexity/cost limits and cap alias + batch counts.
+- Rate-limit by resolved cost (not request count); validate/allowlist any argument reaching a DB/URL/command sink; treat GraphQL inputs as untrusted.
 
 ## Related Skills & Chains
 

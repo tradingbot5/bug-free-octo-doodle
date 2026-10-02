@@ -3,6 +3,9 @@ name: hunt-auth-bypass
 description: Hunting skill for auth bypass vulnerabilities. Built from 12 public bug bounty reports across SAML XSW / parser-differential (GitHub Enterprise CVE-2025-25291/25292), SAML signature stripping (Uber, Rocket.Chat, samlify CVE-2025-47949), SAML domain enforcement bypass via control characters (HackerOne 2024), partner-portal cross-IdP assertion reuse (Slack), WordPress XMLRPC bypassing SSO (Uber), JWT alg-confusion HS256/RS256 (Jitsi), JWT signature-validation skip (Linktree, Newspack), and token-audience confusion (Argo CD CVE-2023-22482). For standalone JWT signature/crypto forging (alg:none, key confusion, kid/jku) see hunt-jwt-crypto; this skill covers JWT only inside SSO/SAML/token-trust bypass chains. SAML assertion-layer attacks (XSW, comment injection, signature stripping, XXE-in-assertion) are owned by hunt-saml; this skill owns the broader cross-protocol auth-bypass taxonomy. Use when hunting auth bypass — see the Legacy-Protocol Matrix for branded-UI vs legacy-endpoint patterns.
 sources: github, hackerone_public, github_security_lab, projectdiscovery_research
 report_count: 12
+cwe: [CWE-287, CWE-290, CWE-306, CWE-863, CWE-305]
+cvss_baseline: "High (8.1) auth bypass to a normal account → Critical (9.8) admin/any-user or unauth access to protected functionality. The gate is a crossed auth boundary, not a theoretical token tweak."
+related_skills: [hunt-saml, hunt-jwt-crypto, hunt-oauth, hunt-session, hunt-idor, triage-validation]
 ---
 
 ## Crown Jewel Targets
@@ -439,6 +442,29 @@ app.post('/api/admin/delete', deleteUser);         // no server-side check
 **Real paid example — HackerOne TrustHub:** `POST /graphql` with the `TrustHubQuery` operation had no authorization check — a regular user could read all vendors' data (CVSS 8.7, High). The object-level variant (e.g. a WebSocket `get_history` accepting an arbitrary UUID with no ownership check) belongs to `hunt-idor`.
 
 ---
+
+## New Techniques (2024-2026)
+
+### Forced-browsing & middleware-gap bypass
+The most common modern auth bypass isn't crypto — it's a route the auth layer never covers:
+- **Framework middleware gaps** — Next.js `x-middleware-subrequest` (CVE-2025-29927, `hunt-nextjs`), path-matcher exclusions (`/_next`, `/static`, trailing-slash/`%2e`/case variants), reverse-proxy ACL vs app-route mismatch (`X-Original-URL`, `hunt-host-header`).
+- **Legacy/alt entry points** — mobile/API path, GraphQL mutation, `/v1/` version, or XMLRPC that skips the SSO the UI enforces (`hunt-shadow-api`, `hunt-spa-api`).
+- **HTTP method/verb** — `HEAD`/`OPTIONS`/`PUT` or `X-HTTP-Method-Override` reaching an unguarded handler.
+
+### Identity/claim confusion
+- **JWT trust-chain** issues (alg confusion, unverified `iss`/`aud`) — details in `hunt-jwt-crypto`; here they appear inside SSO/token-trust bypass chains.
+- **SAML parser-differential / XSW / signature-stripping** (ruby-saml CVE-2024-45409, GHE CVE-2025-25291/25292) — owned by `hunt-saml`; chain as cross-protocol bypass.
+- **BFF/Duende token-confusion & session-fixation** (covered above) — session not rotated on auth, or attacker-fixed session accepted post-login.
+- **Response/flag tamper** — `{"authenticated":false}`→`true`, 302→200, or a client-trusted role claim.
+
+### Null/array/type-confusion credential checks
+`password[]=`, `{"password":null}`, empty-string secret with `kid`→`/dev/null`, loose `==` comparisons, and "auth check throws → fail-open" (`hunt-exceptional-conditions`).
+
+## Remediation
+
+- Enforce authentication/authorization server-side on every route and verb at the application layer (not only edge middleware); default-deny unknown paths.
+- Verify tokens/assertions fully (signature over the used DOM, `iss`/`aud`/`exp`, pinned keys); rotate session IDs on login; make auth checks fail closed.
+- Apply the same auth uniformly across web, mobile, API, GraphQL, and legacy endpoints; remove/guard XMLRPC and old API versions.
 
 ## Related Skills & Chains
 

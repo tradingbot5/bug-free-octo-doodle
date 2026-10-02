@@ -3,6 +3,9 @@ name: hunt-race-condition
 description: Hunting skill for race condition vulnerabilities. Built from 12 public bug bounty reports including modern HTTP/2 single-packet attack cases (James Kettle DEF CON 2023 "Smashing the State Machine"; RyotaK / Flatt Security 10,000-request first-sequence-sync expansion 2024). Covers coupon double-redemption, gift-card double-spend, MFA-OTP-validate race, account-create race, faucet/crypto token double-mint, email-activation race, vote/upvote inflation, password-reset token race, rate-limit bypass via concurrent requests. Use when hunting race conditions, TOCTOU bugs, MFA-bypass-via-timing.
 sources: github, hackerone_public, portswigger_research, flatt_security
 report_count: 10
+cwe: [CWE-362, CWE-367, CWE-366, CWE-20]
+cvss_baseline: "Medium-High (6-8) limit-overrun (double-redeem, over-withdraw) → Critical (9+) when it yields money/MFA-bypass/privilege at scale. One success among many 'already-used' confirms the window."
+related_skills: [hunt-business-logic, hunt-fintech-graphql, hunt-mfa-bypass, hunt-payment-security, hunt-captcha-bypass]
 ---
 
 ## Firing a race — two primitives (tooling-agnostic)
@@ -474,6 +477,26 @@ Implementation: [flatt.tech/research/posts/beyond-the-limit-...](https://flatt.t
 - Disclosed Report Citations above — citations #4, #11, #12 are the canonical single-packet exemplars (GitLab/Devise CVE-2022-4037, Flatt 10k-req PIN brute-force, nopCommerce CVE-2024-58248)
 
 ---
+
+## New Techniques (2024-2026)
+
+### Single-packet attack (HTTP/2) — the current default
+Kettle's single-packet technique removes network-jitter as a variable: send 20-30 requests whose last byte is withheld, then release together so they arrive in one TCP packet and are processed near-simultaneously. Use **Turbo Intruder** (`engine=Engine.BURP2`, `gate` sync) or **Burp Repeater → "Send group in parallel (single-packet)"**. For HTTP/1.1-only targets, use last-byte-sync / first-sequence-sync (RyotaK 2024). This beats the old "fire a few with threads" approach that resolves sequentially as "already-used".
+
+### Where the window lives (hunt list)
+Coupon/gift-card/credit double-redeem, balance over-withdraw, faucet/airdrop double-mint, vote/like/follow inflation, MFA-OTP validate race (`hunt-mfa-bypass`), password-reset token race, account/username uniqueness race, invite/seat-limit overrun, idempotency-key TOCTOU (`hunt-fintech-graphql`), file upload validate-then-move (`hunt-file-upload`), rate-limit/CAPTCHA counter race (`hunt-captcha-bypass`).
+
+### GraphQL-native racing
+Alias the same mutation N times in **one** document (one request, one parse, racing the shared check) — defeats per-request throttles; batch arrays likewise. Cross-ref `hunt-fintech-graphql`.
+
+### Confirmation discipline
+A real race shows **>1 success** (or 1 success + many "already-used/duplicate") against a single logical limit, reproducible, on your own test account. A lone anomaly isn't proof — repeat the parallel burst and show the state delta (balance, redemption count). Keep volume minimal; never drain real funds.
+
+## Remediation
+
+- Enforce atomicity at the data layer: DB transactions with `SELECT ... FOR UPDATE`/optimistic-locking/unique constraints, or atomic compare-and-set — not read-then-write in app code.
+- Idempotency keys consumed atomically before processing; server-side per-account limits checked inside the transaction; distributed locks for multi-node.
+- Cap batch/alias counts on GraphQL; apply rate limits that increment before the business logic, not after.
 
 ## Related Skills & Chains
 

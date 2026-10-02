@@ -3,6 +3,9 @@ name: hunt-cache-poison
 description: Hunting skill for cache poison vulnerabilities. Built from 10 public bug bounty reports including X-Forwarded-Host poisoning, X-HTTP-Method-Override / GCS cache, reflected→stored XSS via cache, classic Omer-Gil Web Cache Deception, Cloudflare Cache Deception Armor bypass, session-token cache deception, Akamai hop-by-hop smuggling → server-side edge poisoning, and Kettle's 2024 path-normalization WCD against Cloudflare/Fastly/GCP. Host/X-Forwarded-Host injection that reaches app logic (reset-link poisoning, routing SSRF, OAuth issuer) is owned by hunt-host-header; this skill owns the case where the poisoned response is CACHED and served to other users. Use when hunting cache poisoning, Web Cache Deception, CDN-fronted apps.
 sources: github, hackerone_public, portswigger_research, omergil_research, youstin_research
 report_count: 8
+cwe: [CWE-444, CWE-525, CWE-346, CWE-639]
+cvss_baseline: "High (7.4-8.1) shared-cache poisoning → mass XSS/redirect/CSP-bypass or cache-deception session/PII theft → Critical if it serves ATO-grade payloads site-wide. Self-only/keyed reflection = Low."
+related_skills: [hunt-host-header, hunt-http-smuggling, hunt-xss, hunt-open-redirect, hunt-cors]
 ---
 
 ## Crown Jewel Targets
@@ -328,6 +331,34 @@ The following real, verified bug-bounty / coordinated-disclosure cases extend th
     - Year: 2024 — coordinated CDN-vendor disclosure; methodology research (no single bounty), PortSwigger Top-10 Web Hacking Techniques 2024 entry
 
 ---
+
+## New Techniques (2024-2026)
+
+### Cache-key normalization / path-confusion WCD (Kettle 2024)
+The current high-impact class is **path-normalization Web Cache Deception** against Cloudflare/Fastly/GCP: the cache and origin disagree on where the path ends, so a dynamic, authed page gets cached under a static-looking key.
+```
+GET /account/settings/foo.js        # origin serves settings; CDN caches by .js as static
+GET /account%2f%2e%2e%2fsettings    # normalization delta
+GET /account/settings;foo.css       # path-param / matrix-URI confusion
+GET /account/settings%23/x.css      # encoded fragment
+GET /api/me/..%2f..%2fstatic.css    # dot-segment that origin resolves, cache doesn't
+```
+Fetch as the victim (authed), then re-fetch the crafted URL unauthenticated / from a second client — if you get the victim's data, it's cached cross-user.
+
+### Unkeyed-input poisoning (expanded)
+Param-miner the request for **unkeyed headers** (`X-Forwarded-Host/Scheme/Port`, `X-Original-URL`, `X-Forwarded-Server`) and **unkeyed query params / cache-buster behavior** that reflect into a cacheable response (absolute URL, redirect `Location`, `<script src>`, CSP). Poison once, fetch clean on the same key from a fresh egress to prove shared impact.
+
+### Fat-GET & parameter cloaking
+`GET` with a body, duplicate/semicolon-delimited params the cache and origin parse differently (`?utm=x;callback=evil`), and `Vary` gaps. Hop-by-hop header abuse and smuggling-fed edge poisoning (`hunt-http-smuggling`).
+
+### Confirmation discipline
+Shared-cache proof = a request that **omits** the injected input (second machine / incognito) still returns your payload. `Age:0`/`MISS` every time, or a `Vary`-keyed reflection, is self-only → demote. Don't poison high-traffic production keys with real-user impact without authorization.
+
+## Remediation
+
+- Cache static assets by content type/extension verified at the **origin**, not by URL suffix; normalize paths identically at CDN and origin; set explicit `Cache-Control: private/no-store` on authed/dynamic responses.
+- Key the cache on every input that influences the response (relevant headers via `Vary`, or exclude them); never reflect host/forwarded headers into cacheable bodies.
+- Disable fat-GET caching; align parameter parsing; patch the smuggling vectors that feed edge poisoning.
 
 ## Related Skills & Chains
 

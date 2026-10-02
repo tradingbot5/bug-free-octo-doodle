@@ -3,6 +3,9 @@ name: hunt-oauth
 description: Hunting skill for oauth vulnerabilities. Built from 19 public bug bounty reports. Use when hunting oauth on any target.
 sources: github, hackerone_public, salt_labs, descope, detectify_labs, harel_research
 report_count: 22
+cwe: [CWE-601, CWE-287, CWE-352, CWE-346, CWE-290]
+cvss_baseline: "High (8.1) auth-code/token theft to a normal account → Critical (9.1-9.8) full ATO or cross-tenant via redirect_uri/state/PKCE flaws. Missing-state alone (no delivered artifact) is Medium."
+related_skills: [hunt-open-redirect, hunt-ato, hunt-saml, hunt-jwt-crypto, hunt-host-header, hunt-clickjacking]
 ---
 
 ## Crown Jewel Targets
@@ -403,6 +406,40 @@ A server-side prefix-match flaw on `redirect_uri` is **necessary but not suffici
 **Always headless-test (Playwright / Puppeteer / a real browser) the final navigation BEFORE writing the OAuth finding as ATO-chain.** Server-side accept + browser-side stay-on-legitimate-host = **not** ATO. Verified live in `docs/verification/phase3-playwright-browser-execution.md` Test 29.
 
 ---
+
+## New Techniques (2024-2026)
+
+### redirect_uri validation bypass (still the #1 payout)
+Registered-URI matching is where ATO lives — test every relaxation:
+```
+.../callback/../redirect?url=//attacker      # path traversal / prefix match
+.../callback%2f..%2f                          # encoded traversal
+redirect_uri=https://sub.attacker.target.com  # any-subdomain allow
+redirect_uri=https://target.com.attacker.com   # suffix/substring match bug
+redirect_uri=https://target.com@attacker.com   # userinfo confusion
+redirect_uri=https://target.com/cb?next=//attacker   # open-redirect-on-trusted-host chain
+response_mode=web_message / form_post          # token via postMessage to a frameable page (DoubleClickjacking → hunt-clickjacking)
+```
+Cross-ref `hunt-open-redirect` (parser-differential payloads).
+
+### PKCE / state / nonce downgrade
+- **PKCE downgrade** — omit `code_challenge` or send `code_challenge_method=plain`; if the server still issues/accepts, code-interception ATO is back on public clients.
+- **state fixation / missing state** → login CSRF / account-link CSRF; **nonce not bound** → ID-token replay.
+- **code reuse / no single-use** → replay an auth code; **cross-client code** → use a code issued for client A at client B.
+
+### Token & identity confusion
+- **ID-token `aud`/`iss` not validated**, or **JWT alg confusion** on the ID token (`hunt-jwt-crypto`).
+- **Account pre-linking / email-not-verified** — link attacker identity to a victim account by unverified email (`sub` vs email trust).
+- **Dynamic client registration** abuse; **`request_uri` SSRF** (JAR/PAR) → internal fetch; **implicit-flow token in URL** leaking via Referer/history.
+
+### Mix-up & deputy
+OAuth mix-up (authorization-server confusion) where the client doesn't bind the response to the AS it started with; **DoubleClickjacking the consent page** for silent grant (`hunt-clickjacking`).
+
+## Remediation
+
+- Exact-match registered `redirect_uri` (full string, no prefix/subdomain/substring); enforce PKCE S256 for all clients; mandatory, single-use, bound `state` and `nonce`.
+- Validate ID-token `iss`/`aud`/`exp`/signature with pinned keys; only auto-link accounts on verified email; single-use auth codes bound to client + PKCE verifier.
+- Restrict/disable dynamic registration; validate/allowlist `request_uri`; prefer `form_post`/code over implicit; frame-protect the consent page.
 
 ## Related Skills & Chains
 
